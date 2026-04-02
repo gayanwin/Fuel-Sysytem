@@ -1,13 +1,12 @@
 /**
- * Fuel Price Adjustment System - Final Fix
- * UI එක වෙනස් නොකර, දත්ත සහ Heading පමණක් වෙනස් කරයි.
+ * Fuel Price Adjustment System - Data Engine
+ * UI එක වෙනස් නොකර දත්ත පමණක් ලබා ගැනීමට සකසා ඇත.
  */
 
-// උඹේ අලුත් Google Sheet එකේ CSV link එක
-const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSnyC3aF3aQzD_S0-n037pGq6tX_jOonvI6iF9xX0O06_xS_O00_6_o_O0/pub?output=csv';
-// සටහන: උඩ ලින්ක් එක වැඩ නැත්නම් මේක පාවිච්චි කරන්න: 
-const FINAL_URL = 'https://docs.google.com/spreadsheets/d/1bpKLZPZHI4cv_wxxpx53IDXYrzl_8DRNwEV5mH5nz3o/gviz/tq?tqx=out:csv';
+// උඹ දුන්න නිවැරදි Google Sheet CSV link එක
+const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRFBYTixlf9JHq7oc523FFnWAB4NnGWkAu5Sy6ZNmdr_rHJHPZz7_mJf-XGgW8aT_yIj3Xv4wCnSTsQ/pub?output=csv';
 
+// Database Initialization
 const db = new Dexie('FuelSystemDB');
 db.version(1).stores({ vehicles: '++id, plateNo, fixedPrice' });
 
@@ -16,7 +15,7 @@ let selectedFuelType = 'lp92';
 let selectedVehicle = null;
 let rangesCount = 0;
 
-// 1. දත්ත ලබා ගැනීම (Refresh Button එකටත් මේක වැඩ)
+// 1. Fetch Data from Sheet
 async function fetchLiveFuelData() {
     const statusEl = document.getElementById('systemStatus');
     const refreshBtn = document.getElementById('refreshBtn');
@@ -24,19 +23,23 @@ async function fetchLiveFuelData() {
     if(refreshBtn) refreshBtn.querySelector('i').classList.add('fa-spin');
 
     try {
-        const response = await fetch(FINAL_URL);
+        const cacheBuster = new Date().getTime();
+        const response = await fetch(`${SHEET_CSV_URL}&t=${cacheBuster}`);
         const csvData = await response.text();
-        const rows = csvData.split('\n').map(row => row.split(',').map(cell => cell.replace(/"/g, '')));
         
-        const latest = rows[1];
+        // CSV පේළි වලට කඩා ගැනීම
+        const rows = csvData.split('\n').map(row => row.split(','));
+        
+        // අලුත්ම මිල ගණන් (Latest row - Index 1)
+        const latest = rows[1]; 
         if (latest) {
-            // උඹේ HTML එකේ තියෙන ID වලට දත්ත දානවා
             if(document.getElementById('price_lp92')) document.getElementById('price_lp92').innerText = latest[1];
             if(document.getElementById('price_lp95')) document.getElementById('price_lp95').innerText = latest[2];
             if(document.getElementById('price_lad')) document.getElementById('price_lad').innerText = latest[3];
             if(document.getElementById('price_lsd')) document.getElementById('price_lsd').innerText = latest[4];
         }
 
+        // සම්පූර්ණ ඉතිහාසය Array එකකට ගැනීම
         allFuelHistory = rows.slice(1).map(row => ({
             date: row[0] ? row[0].trim() : "",
             lp92: parseFloat(row[1]) || 0,
@@ -46,17 +49,17 @@ async function fetchLiveFuelData() {
         })).filter(item => item.date !== "");
 
         updateLivePricesUI();
-        if (statusEl) statusEl.innerHTML = '<span class="text-green-500 font-black">● LIVE</span>';
+        if (statusEl) statusEl.innerHTML = '<span class="text-green-500 font-black">● LIVE SYNC</span>';
 
     } catch (e) {
-        console.error("Error:", e);
+        console.error("Fetch Error:", e);
         if (statusEl) statusEl.innerHTML = '<span class="text-red-500 font-bold">OFFLINE</span>';
     } finally {
         if(refreshBtn) refreshBtn.querySelector('i').classList.remove('fa-spin');
     }
 }
 
-// 2. Tab එක මාරු කරන Function එක
+// 2. UI Update (Tabs and Dynamic Title)
 window.setFuelTab = function(type) {
     selectedFuelType = type;
     updateLivePricesUI();
@@ -64,7 +67,6 @@ window.setFuelTab = function(type) {
 
 function updateLivePricesUI() {
     const list = document.getElementById('priceHistoryList');
-    // HTML එකේ 'Live 92 Octane Prices' කියලා තියෙන තැනට මේ ID එක තියෙන්න ඕනේ
     const titleEl = document.getElementById('fuelTitle'); 
 
     if (!list) return;
@@ -78,12 +80,10 @@ function updateLivePricesUI() {
 
     const current = fuelConfig[selectedFuelType];
 
-    // උඹ ඉල්ලපු විදියට නම මාරු කරනවා
-    if (titleEl) {
-        titleEl.innerText = `Live ${current.title} Prices`;
-    }
+    // ටැබ් එක මාරු කරද්දී උඩ නම මාරු කිරීම
+    if (titleEl) titleEl.innerText = `Live ${current.title} Prices`;
 
-    // Tabs ටික ඔරිජිනල් විදියටම හදනවා
+    // Tabs ටික ඔරිජිනල් ස්ටයිල් එකටම
     let tabsHTML = `
         <div class="flex justify-center gap-2 mb-4">
             ${Object.keys(fuelConfig).map(key => `
@@ -98,7 +98,7 @@ function updateLivePricesUI() {
         </div>
     `;
 
-    // History List එක පරණ Design එකටම
+    // ඉතිහාසය පේළි 6
     let rowsHTML = allFuelHistory.slice(0, 6).map(entry => `
         <div class="flex items-center justify-between p-3 bg-white border border-slate-100 rounded-2xl mb-2">
             <div class="flex flex-col">
@@ -114,7 +114,7 @@ function updateLivePricesUI() {
     list.innerHTML = tabsHTML + rowsHTML;
 }
 
-// වාහන සහ Calculator වැඩ ටික (උඹේ පරණ එකමයි)
+// 3. Vehicle & Calculator (Same Logic)
 async function loadVehicles() {
     const vehicles = await db.vehicles.toArray();
     const list = document.getElementById('vehicleList');
@@ -123,10 +123,10 @@ async function loadVehicles() {
     vehicles.forEach(v => {
         const isActive = (selectedVehicle?.id === v.id);
         list.innerHTML += `
-            <div onclick="selectVehicle(${v.id})" class="p-4 mb-2 rounded-2xl border-2 transition-all cursor-pointer ${isActive ? 'border-blue-500 bg-blue-50' : 'border-white bg-white shadow-sm'}">
+            <div onclick="selectVehicle(${v.id})" class="p-4 mb-2 rounded-2xl border-2 cursor-pointer ${isActive ? 'border-blue-500 bg-blue-50' : 'border-white bg-white shadow-sm'}">
                 <div class="flex justify-between items-center uppercase font-black text-[10px]">
                     <span>${v.plateNo}</span>
-                    <span class="text-slate-400 font-mono">Rs. ${v.fixedPrice}</span>
+                    <span class="text-slate-400">Rs. ${v.fixedPrice}</span>
                 </div>
             </div>`;
     });
@@ -162,7 +162,7 @@ function addDateRangeRow() {
             </div>
             <div class="flex justify-between items-center text-[9px] font-black text-slate-400">
                 <span id="priceInfo_${rangesCount}">---</span>
-                <span>Sub: Rs. <span id="subtotal_${rangesCount}" class="text-blue-600 font-mono">0.00</span></span>
+                <span>Sub: Rs. <span id="subtotal_${rangesCount}" class="text-blue-600">0.00</span></span>
             </div>
         </div>`;
     container.insertAdjacentHTML('beforeend', rowHTML);
@@ -179,7 +179,7 @@ function calculateTotalAdjustment() {
             const entry = allFuelHistory.find(p => p.date <= dVal) || allFuelHistory[allFuelHistory.length - 1];
             const diff = entry.lp92 - selectedVehicle.fixedPrice;
             const sub = diff * lVal;
-            document.getElementById(`priceInfo_${i}`).innerText = `Market: Rs. ${entry.lp92}`;
+            document.getElementById(`priceInfo_${i}`).innerText = `Rate: Rs. ${entry.lp92}`;
             document.getElementById(`subtotal_${i}`).innerText = sub.toFixed(2);
             grandTotal += sub;
         }
@@ -193,17 +193,17 @@ function clearAllRanges() {
     document.getElementById('totalAdjustmentValue').innerText = '0.00'; 
 }
 
-// 3. Initialize
+// Initializing
 window.onload = () => {
     fetchLiveFuelData();
     loadVehicles();
     
     const refreshBtn = document.getElementById('refreshBtn');
     if(refreshBtn) {
-        refreshBtn.addEventListener('click', (e) => {
+        refreshBtn.onclick = (e) => {
             e.preventDefault();
             fetchLiveFuelData();
-        });
+        };
     }
 
     if(document.getElementById('addRangeBtn')) document.getElementById('addRangeBtn').addEventListener('click', addDateRangeRow);
