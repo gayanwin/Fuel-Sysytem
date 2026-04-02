@@ -1,6 +1,5 @@
 /**
- * Fuel Price Adjustment System - Google Sheets Stable Sync
- * Date, LP92, LP95, LAD, LSD Compatible
+ * Fuel Price Adjustment System - Google Sheets Sync (Anti-Cache Version)
  */
 
 const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRFBYTixlf9JHq7oc523FFnWAB4NnGWkAu5Sy6ZNmdr_rHJHPZz7_mJf-XGgW8aT_yIj3Xv4wCnSTsQ/pub?output=csv';
@@ -13,20 +12,18 @@ let currentPricesObj = { lp92: 0, lp95: 0, lad: 0, lsd: 0 };
 let selectedVehicle = null;
 let rangesCount = 0;
 
-// 1. Google Sheet එකෙන් දත්ත කියවීම
 async function fetchLiveFuelData() {
     const statusEl = document.getElementById('systemStatus');
     const lockScreen = document.getElementById('offlineLock');
 
     try {
-        const response = await fetch(`${SHEET_CSV_URL}&cachebust=${new Date().getTime()}`);
-        const csvData = await response.text();
+        // Cache Buster: ලින්ක් එක අගට අලුත් වෙලාව එකතු කරනවා බ්‍රවුසර් එක රවට්ටන්න
+        const cacheBuster = new Date().getTime();
+        const response = await fetch(`${SHEET_CSV_URL}&t=${cacheBuster}`);
         
-        // CSV එක පේළි වලට කඩා ගැනීම
+        const csvData = await response.text();
         const rows = csvData.split('\n').map(row => row.split(','));
         
-        // පලවෙනි පේළිය Headers නිසා 2වෙනි පේළියේ (Index 1) දත්ත Current මිල විදිහට ගන්නවා
-        // පේළිය: Date(0), LP92(1), LP95(2), LAD(3), LSD(4)
         const latest = rows[1];
         if (latest) {
             currentPricesObj = {
@@ -36,14 +33,12 @@ async function fetchLiveFuelData() {
                 lsd: parseFloat(latest[4]) || 0
             };
 
-            // UI එකේ Widgets වලට දත්ත දැමීම
             if(document.getElementById('price_lp92')) document.getElementById('price_lp92').innerText = currentPricesObj.lp92;
             if(document.getElementById('price_lp95')) document.getElementById('price_lp95').innerText = currentPricesObj.lp95;
             if(document.getElementById('price_lad')) document.getElementById('price_lad').innerText = currentPricesObj.lad;
             if(document.getElementById('price_lsd')) document.getElementById('price_lsd').innerText = currentPricesObj.lsd;
         }
 
-        // සම්පූර්ණ ඉතිහාසය (History) සැකසීම - LP92 පදනම් කරගෙන
         livePrices = rows.slice(1).map(row => ({
             date: row[0] ? row[0].trim() : "",
             price: parseFloat(row[1]) || 0,
@@ -52,7 +47,7 @@ async function fetchLiveFuelData() {
 
         updateLivePricesUI();
         
-        if (statusEl) statusEl.innerHTML = '<span class="text-green-500 font-black">● LIVE SYNC OK</span>';
+        if (statusEl) statusEl.innerHTML = '<span class="text-green-500 font-black">● LIVE SYNC ACTIVE</span>';
         if (lockScreen) lockScreen.classList.add('hidden');
 
     } catch (e) {
@@ -76,7 +71,6 @@ function updateLivePricesUI() {
         </div>`).join('');
 }
 
-// වාහන කළමනාකරණය
 async function loadVehicles() {
     const vehicles = await db.vehicles.toArray();
     const list = document.getElementById('vehicleList');
@@ -88,7 +82,7 @@ async function loadVehicles() {
             <div onclick="selectVehicle(${v.id})" class="p-3 mb-2 rounded-xl border-2 transition-all cursor-pointer ${isActive ? 'border-blue-500 bg-blue-50' : 'border-slate-100 bg-white'}">
                 <div class="flex justify-between items-center text-left">
                     <span class="text-sm font-black text-slate-800 uppercase">${v.plateNo}</span>
-                    <span class="text-[10px] font-bold px-2 py-0.5 bg-slate-100 text-slate-600 rounded">Fixed: Rs. ${v.fixedPrice}</span>
+                    <span class="text-[10px] font-bold px-2 py-0.5 bg-slate-100 text-slate-600 rounded">Rs. ${v.fixedPrice}</span>
                 </div>
             </div>`;
     });
@@ -116,7 +110,6 @@ window.saveVehicle = async function() {
     }
 };
 
-// ගණනය කිරීම්
 function addDateRangeRow() {
     rangesCount++;
     const container = document.getElementById('dateRangesContainer');
@@ -148,7 +141,6 @@ function calculateTotalAdjustment() {
         const dVal = document.getElementById(`start_date_${i}`)?.value;
         const lVal = parseFloat(document.getElementById(`liters_${i}`)?.value) || 0;
         if (dVal && lVal > 0) {
-            // තෝරාගත් දිනට අදාළ මිල (LP92) සෙවීම
             const entry = livePrices.find(p => p.date <= dVal) || livePrices[livePrices.length - 1];
             const diff = entry.price - selectedVehicle.fixedPrice;
             const sub = diff * lVal;
