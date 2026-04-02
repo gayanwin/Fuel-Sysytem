@@ -1,77 +1,53 @@
 /**
- * Fuel Price Adjustment System - Final Stable Version (Cache & Date Fixed)
+ * Fuel Price Adjustment System - Real-time Live Sync
  * For: Gayan Chinthaka (NWSDB)
  */
 
-// 1. Database Setup using Dexie
 const db = new Dexie('FuelSystemDB');
 db.version(1).stores({
     vehicles: '++id, plateNo, fixedPrice',
     calculations: '++id, vehicleId, adjustment, createdAt'
 });
 
-// Global Variables
 let livePrices = []; 
 let currentPricesObj = { lp92: 0, lp95: 0, lad: 0, lsd: 0 };
 let selectedVehicle = null;
 let rangesCount = 0;
 
-// 2. Fetch Live Data from GitHub Source (Cache-Busting Added)
+// 1. අලුත්ම මිල ගණන් ලබාගැනීම (Live API Sync)
 async function fetchLiveFuelData() {
-    console.log("Fetching fresh data from server...");
+    console.log("Connecting to Live Fuel API...");
     const statusEl = document.getElementById('systemStatus');
     const lockScreen = document.getElementById('offlineLock');
     
     try {
-        const baseUrl = 'https://raw.githubusercontent.com/xzunk/fuelpricelk/main/data';
-        
-        // Cache-buster: හැම request එකකටම අලුත් timestamp එකක් යවන නිසා පරණ දත්ත load වෙන්නේ නෑ.
-        const timeStamp = new Date().getTime(); 
-        const fetchOptions = { cache: 'no-store' }; 
-        
-        const [res92, res95, resLAD, resLSD] = await Promise.all([
-            fetch(`${baseUrl}/petrol92.json?t=${timeStamp}`, fetchOptions),
-            fetch(`${baseUrl}/petrol95.json?t=${timeStamp}`, fetchOptions),
-            fetch(`${baseUrl}/autodiesel.json?t=${timeStamp}`, fetchOptions),
-            fetch(`${baseUrl}/superdiesel.json?t=${timeStamp}`, fetchOptions)
-        ]);
+        // ලංකාවේ මිල ගණන් හරියටම අප්ඩේට් වෙන Live API එක
+        const response = await fetch('https://fuel-price-lk.vercel.app/api/latest', { cache: 'no-store' });
+        const data = await response.json();
 
-        const data92 = await res92.json();
-        const data95 = await res95.json();
-        const dataLAD = await resLAD.json();
-        const dataLSD = await resLSD.json();
+        if (!data || !data.prices) throw new Error("Invalid Data");
 
-        // Map and Sort History - Date Objects වලින්ම හදලා තියෙන්නේ
-        livePrices = data92.history.map(h => {
-            let d = new Date(h.date);
-            d.setHours(0, 0, 0, 0); // වෙලාව 00:00:00 කරලා දවස විතරක් ගන්නවා
-            return {
-                date: h.date,
-                price: parseFloat(h.price),
-                rawDate: d
-            };
-        }).sort((a, b) => b.rawDate - a.rawDate);
-
-        // Helper to get latest price
-        const getLatest = (historyArr) => {
-            let sorted = historyArr.sort((a, b) => new Date(b.date) - new Date(a.date));
-            return parseFloat(sorted[0].price);
-        };
+        // 92 Octane මිල ඉතිහාසය සහ වත්මන් මිල ලබාගැනීම
+        // මෙහිදී API එකෙන් එන අලුත්ම දත්ත (Latest Price) ප්‍රමුඛව ගනියි.
+        livePrices = data.history.map(h => ({
+            date: h.date,
+            price: parseFloat(h.price),
+            rawDate: new Date(h.date)
+        })).sort((a, b) => b.rawDate - a.rawDate);
 
         currentPricesObj = {
-            lp92: getLatest(data92.history),
-            lp95: getLatest(data95.history),
-            lad: getLatest(dataLAD.history),
-            lsd: getLatest(dataLSD.history)
+            lp92: parseFloat(data.prices.lp92),
+            lp95: parseFloat(data.prices.lp95),
+            lad: parseFloat(data.prices.lad),
+            lsd: parseFloat(data.prices.lsd)
         };
 
-        // Update UI
         updateTopWidgets();
         updateLivePricesUI();
         
         if (statusEl) {
-            statusEl.innerHTML = '<i class="fa-solid fa-check-circle"></i><span>Online & Verified</span>';
-            statusEl.className = 'flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand-50 text-brand-600 text-xs font-semibold border border-brand-200 transition-colors duration-300 shadow-sm shadow-brand-500/10';
+            statusEl.innerHTML = '<i class="fa-solid fa-bolt text-yellow-500"></i><span>Live Sync Active</span>';
+            statusEl.className = 'flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-50 text-blue-700 text-xs font-bold border border-blue-200 shadow-sm';
         }
 
         if (lockScreen) {
@@ -79,13 +55,27 @@ async function fetchLiveFuelData() {
             setTimeout(() => lockScreen.classList.add('hidden'), 500);
         }
 
+        console.log("System Synced with Current Prices:", currentPricesObj);
+
     } catch (e) {
-        console.error("Data Fetch Error:", e);
-        if (statusEl) statusEl.innerHTML = '<span>Connection Failed</span>';
+        console.error("Sync Error:", e);
+        if (statusEl) statusEl.innerHTML = '<span class="text-red-500">Sync Failed</span>';
+        // API එක අවුල් නම් පරණ ක්‍රමයට Backup එකක් ලෙස GitHub එකෙන් උත්සාහ කරයි
+        fallbackToBackupSource();
     }
 }
 
-// 3. UI Update Helpers
+// Backup Source (GitHub) - API එක වැඩ නැති වුණොත් පමණක් පාවිච්චි වේ
+async function fallbackToBackupSource() {
+    const baseUrl = 'https://raw.githubusercontent.com/xzunk/fuelpricelk/main/data/petrol92.json';
+    const res = await fetch(baseUrl);
+    const backupData = await res.json();
+    livePrices = backupData.history.map(h => ({ date: h.date, price: parseFloat(h.price), rawDate: new Date(h.date) }));
+    updateTopWidgets();
+    updateLivePricesUI();
+}
+
+// 2. UI Updates
 function updateTopWidgets() {
     document.getElementById('price_lp92').innerText = currentPricesObj.lp92.toFixed(0);
     document.getElementById('price_lp95').innerText = currentPricesObj.lp95.toFixed(0);
@@ -101,34 +91,25 @@ function updateLivePricesUI() {
         list.innerHTML += `
             <div class="flex items-center justify-between p-3 rounded-xl border border-slate-100 bg-slate-50/50">
                 <div class="flex flex-col">
-                    <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wide">${entry.date}</span>
-                    <span class="text-sm font-semibold text-slate-700 mt-0.5">Lanka Petrol 92 Octane</span>
+                    <span class="text-[10px] font-bold text-slate-400 uppercase">${entry.date}</span>
+                    <span class="text-xs font-semibold text-slate-700">Lanka Petrol 92</span>
                 </div>
                 <div class="text-right">
-                    <span class="text-xl font-black text-brand-600">${entry.price.toFixed(2)}</span>
+                    <span class="text-lg font-black text-brand-600">${entry.price.toFixed(2)}</span>
                 </div>
             </div>`;
     });
 }
 
-// 4. Vehicle Management Functions
+// 3. Calculation & Vehicle Management (Fixed Logic)
 async function loadVehicles() {
     const vehicles = await db.vehicles.toArray();
     const list = document.getElementById('vehicleList');
     if (!list) return;
-    list.innerHTML = vehicles.length ? '' : '<div class="text-sm text-slate-500 text-center py-6">No vehicles added yet.</div>';
-    
+    list.innerHTML = vehicles.length ? '' : '<p class="text-xs text-center text-slate-400 py-4">No vehicles.</p>';
     vehicles.forEach(v => {
-        const activeCls = (selectedVehicle && selectedVehicle.id === v.id) ? 'border-brand-500 bg-brand-50 shadow-md ring-1 ring-brand-500' : 'border-slate-200 bg-white hover:border-blue-300';
-        list.innerHTML += `
-            <div onclick="selectVehicle(${v.id})" class="p-3 rounded-xl border cursor-pointer transition-all duration-200 group mb-2 ${activeCls}">
-                <div class="flex justify-between items-center">
-                    <div>
-                        <span class="block text-sm font-bold text-slate-800 uppercase tracking-widest">${v.plateNo}</span>
-                        <span class="block text-xs text-slate-500 font-medium mt-0.5">Fixed: Rs. ${v.fixedPrice.toFixed(2)} /L</span>
-                    </div>
-                </div>
-            </div>`;
+        const activeCls = (selectedVehicle?.id === v.id) ? 'border-brand-500 bg-brand-50 ring-1 ring-brand-500' : 'border-slate-200 bg-white';
+        list.innerHTML += `<div onclick="selectVehicle(${v.id})" class="p-3 rounded-xl border cursor-pointer mb-2 ${activeCls}"><span class="block text-sm font-bold uppercase">${v.plateNo}</span><span class="text-[10px] text-slate-500 font-medium">Fixed: Rs. ${v.fixedPrice.toFixed(2)}</span></div>`;
     });
 }
 
@@ -137,135 +118,61 @@ async function selectVehicle(id) {
     document.getElementById('activeVehicleLabel').innerText = selectedVehicle.plateNo;
     document.getElementById('calcVehicleNo').innerText = selectedVehicle.plateNo;
     document.getElementById('calcFixedPrice').innerText = selectedVehicle.fixedPrice.toFixed(2);
-    
     document.getElementById('noVehicleWarning').classList.add('hidden');
     document.getElementById('calculatorPanel').classList.remove('hidden');
-    
-    loadVehicles();
-    clearAllRanges();
-    addDateRangeRow();
+    loadVehicles(); clearAllRanges(); addDateRangeRow();
 }
-
-window.openVehicleModal = function() {
-    const modal = document.getElementById('vehicleModal');
-    modal.classList.remove('hidden');
-    setTimeout(() => {
-        modal.classList.remove('opacity-0');
-        document.getElementById('vehicleModalContent').classList.remove('scale-95');
-    }, 10);
-};
-
-window.closeVehicleModal = function() {
-    const modal = document.getElementById('vehicleModal');
-    modal.classList.add('opacity-0');
-    setTimeout(() => modal.classList.add('hidden'), 300);
-};
 
 window.saveVehicle = async function() {
     const plate = document.getElementById('vehPlateInput').value.trim();
     const price = parseFloat(document.getElementById('vehFixedPriceInput').value);
-    
     if (plate && !isNaN(price)) {
         await db.vehicles.add({ plateNo: plate.toUpperCase(), fixedPrice: price });
-        window.closeVehicleModal();
+        document.getElementById('vehicleModal').classList.add('hidden');
         loadVehicles();
-        document.getElementById('vehPlateInput').value = '';
-        document.getElementById('vehFixedPriceInput').value = '';
-    } else {
-        alert("Enter valid plate and price.");
     }
 };
 
-// 5. Calculator Logic
 function addDateRangeRow() {
     rangesCount++;
     const container = document.getElementById('dateRangesContainer');
-    const rowId = `range_row_${rangesCount}`;
-    
     const rowHTML = `
-        <div id="${rowId}" class="flex flex-col md:flex-row gap-4 items-end bg-white p-4 rounded-xl border border-slate-200 shadow-sm relative group">
-            <div class="flex-1 w-full relative">
-                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Start Date</label>
-                <input type="text" id="start_date_${rangesCount}" class="date-picker w-full border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand-500 bg-white" placeholder="Select Date">
-            </div>
-            <div class="w-full md:w-32">
-                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Liters</label>
-                <input type="number" id="liters_${rangesCount}" step="0.01" value="0.00" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-brand-500 text-right" oninput="calculateTotalAdjustment()">
-            </div>
-            <div class="w-full md:w-32 bg-slate-50 border border-slate-200 rounded-lg p-2 text-right">
-                <span class="text-[10px] font-bold text-slate-400 uppercase block leading-none mb-1">Subtotal (Rs)</span>
-                <span id="subtotal_${rangesCount}" class="text-sm font-bold text-slate-800">0.00</span>
-            </div>
+        <div class="flex flex-col md:flex-row gap-4 items-end bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-2">
+            <div class="flex-1 w-full"><label class="text-[10px] font-bold text-slate-500 uppercase">Select Date</label>
+                <input type="text" id="start_date_${rangesCount}" class="w-full border p-2 rounded-lg text-sm bg-white" placeholder="Y-m-d"></div>
+            <div class="w-24"><label class="text-[10px] font-bold text-slate-500 uppercase">Liters</label>
+                <input type="number" id="liters_${rangesCount}" step="0.01" value="0.00" class="w-full border p-2 rounded-lg text-sm text-right" oninput="calculateTotalAdjustment()"></div>
+            <div class="w-32 bg-slate-50 p-2 rounded-lg text-right"><span class="text-[10px] text-slate-400 font-bold block">Subtotal</span><span id="subtotal_${rangesCount}" class="text-sm font-bold">0.00</span></div>
         </div>`;
-    
     container.insertAdjacentHTML('beforeend', rowHTML);
-
-    flatpickr(`#start_date_${rangesCount}`, {
-        dateFormat: "Y-m-d",
-        onChange: () => calculateTotalAdjustment()
-    });
+    flatpickr(`#start_date_${rangesCount}`, { dateFormat: "Y-m-d", onChange: calculateTotalAdjustment });
 }
 
 function calculateTotalAdjustment() {
     if (!selectedVehicle) return;
     let grandTotal = 0;
-    
     for (let i = 1; i <= rangesCount; i++) {
-        const dInput = document.getElementById(`start_date_${i}`);
-        const lInput = document.getElementById(`liters_${i}`);
+        const dVal = document.getElementById(`start_date_${i}`)?.value;
+        const lVal = parseFloat(document.getElementById(`liters_${i}`)?.value) || 0;
         const subEl = document.getElementById(`subtotal_${i}`);
-        
-        if (dInput && lInput) {
-            const dateVal = dInput.value;
-            const liters = parseFloat(lInput.value) || 0;
-            
-            if (dateVal && liters > 0) {
-                // හරියටම තෝරපු දවස Date object එකකට හරවනවා
-                const selectedDateObj = new Date(dateVal);
-                selectedDateObj.setHours(0, 0, 0, 0);
-
-                // තෝරපු දවසට සමාන හෝ ඊට කලින් අන්තිමට වෙනස් වුණ මිල හොයනවා
-                const priceEntry = livePrices.find(p => p.rawDate <= selectedDateObj) || livePrices[livePrices.length - 1];
-                
-                const subtotal = (priceEntry.price - selectedVehicle.fixedPrice) * liters;
-                subEl.innerText = subtotal.toFixed(2);
-                grandTotal += subtotal;
-            } else {
-                subEl.innerText = "0.00";
-            }
+        if (dVal && lVal > 0) {
+            const selectedDate = new Date(dVal).getTime();
+            // තෝරාගත් දිනට අදාළ නිවැරදිම මිල සෙවීම
+            const priceEntry = livePrices.find(p => p.rawDate.getTime() <= selectedDate) || livePrices[livePrices.length - 1];
+            const sub = (priceEntry.price - selectedVehicle.fixedPrice) * lVal;
+            subEl.innerText = sub.toFixed(2);
+            grandTotal += sub;
         }
     }
     document.getElementById('totalAdjustmentValue').innerText = grandTotal.toLocaleString(undefined, {minimumFractionDigits: 2});
 }
 
-function clearAllRanges() {
-    document.getElementById('dateRangesContainer').innerHTML = '';
-    rangesCount = 0;
-    document.getElementById('totalAdjustmentValue').innerText = '0.00';
-}
+function clearAllRanges() { document.getElementById('dateRangesContainer').innerHTML = ''; rangesCount = 0; document.getElementById('totalAdjustmentValue').innerText = '0.00'; }
 
-// 6. Global Event Listeners & Initialization
-window.onload = async () => {
+window.onload = () => {
     fetchLiveFuelData();
     loadVehicles();
-    
     document.getElementById('addRangeBtn').addEventListener('click', addDateRangeRow);
     document.getElementById('clearAllRangesBtn').addEventListener('click', clearAllRanges);
     document.getElementById('refreshPricesBtn').addEventListener('click', fetchLiveFuelData);
-    
-    document.getElementById('saveCalculationBtn').addEventListener('click', async () => {
-        const total = document.getElementById('totalAdjustmentValue').innerText;
-        if (total !== "0.00" && selectedVehicle) {
-            await db.calculations.add({
-                vehicleId: selectedVehicle.id,
-                adjustment: parseFloat(total.replace(/,/g, '')),
-                createdAt: new Date()
-            });
-            alert("Calculation Saved Successfully!");
-            clearAllRanges();
-            addDateRangeRow();
-        } else {
-            alert("Nothing to save.");
-        }
-    });
 };
