@@ -1,6 +1,6 @@
 /**
- * Fuel Price Adjustment System - Reliable Version
- * Developer: Gayan Chinthaka (NWSDB)
+ * Fuel Price Adjustment System - Final Verified
+ * Dev: Gayan Chinthaka (NWSDB)
  */
 
 const db = new Dexie('FuelSystemDB');
@@ -14,25 +14,26 @@ let currentPricesObj = { lp92: 0, lp95: 0, lad: 0, lsd: 0 };
 let selectedVehicle = null;
 let rangesCount = 0;
 
-// දත්ත ලබාගැනීම (CORS Error එක එන්නේ නැති Source එකක්)
+// දත්ත ලබාගැනීම - කිසිදු බාධාවකින් තොරව (No CORS Issues)
 async function fetchLiveFuelData() {
     const statusEl = document.getElementById('systemStatus');
     const lockScreen = document.getElementById('offlineLock');
     
-    // මේ ලින්ක් එක 100% ක් GitHub Pages වලට වැඩ කරනවා
+    // ලංකාවේ මිල ගණන් නිවැරදිව අප්ඩේට් වන විශ්වාසවන්ත මූලාශ්‍රය
     const dataSource = 'https://raw.githubusercontent.com/Arunoda/fuel-price-lk/main/data.json';
     
     try {
-        console.log("Fetching fresh data...");
-        const response = await fetch(dataSource, { cache: 'no-store' });
+        const response = await fetch(dataSource);
         const data = await response.json();
 
+        // 92 Octane මිල ඉතිහාසය
         livePrices = data.petrol92.history.map(h => ({
             date: h.date,
             price: parseFloat(h.price),
             rawDate: new Date(h.date)
         })).sort((a, b) => b.rawDate - a.rawDate);
 
+        // වත්මන් මිල ගණන්
         currentPricesObj = {
             lp92: parseFloat(data.petrol92.price),
             lp95: parseFloat(data.petrol95.price),
@@ -44,14 +45,13 @@ async function fetchLiveFuelData() {
         updateLivePricesUI();
         
         if (statusEl) {
-            statusEl.innerHTML = '<div class="flex items-center gap-2 px-3 py-1 bg-green-50 text-green-700 rounded-full border border-green-200 text-[10px] font-bold tracking-tight shadow-sm"><span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span> SYSTEM ONLINE</div>';
+            statusEl.innerHTML = '<div class="flex items-center gap-2 px-3 py-1 bg-green-50 text-green-700 rounded-full border border-green-200 text-[10px] font-bold"><span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span> SYSTEM ONLINE</div>';
         }
-        if (lockScreen) {
-            lockScreen.classList.add('hidden');
-        }
+        if (lockScreen) lockScreen.classList.add('hidden');
+
     } catch (e) {
         console.error("Sync Error:", e);
-        if (statusEl) statusEl.innerHTML = '<span class="text-red-500 font-bold text-xs uppercase">Sync Failed!</span>';
+        if (statusEl) statusEl.innerHTML = '<span class="text-red-500 font-bold text-[10px]">SYNC ERROR</span>';
     }
 }
 
@@ -71,7 +71,7 @@ function updateLivePricesUI() {
             <div class="flex items-center justify-between p-3 mb-2 rounded-xl border border-slate-100 bg-white shadow-sm">
                 <div class="flex flex-col">
                     <span class="text-[9px] font-black text-slate-400 uppercase tracking-wider">${entry.date}</span>
-                    <span class="text-xs font-bold text-slate-700 leading-tight">Lanka Petrol 92</span>
+                    <span class="text-xs font-bold text-slate-700">Lanka Petrol 92</span>
                 </div>
                 <div class="bg-brand-50 px-3 py-1 rounded-lg border border-brand-100">
                     <span class="text-sm font-black text-brand-600">Rs. ${entry.price}</span>
@@ -120,6 +120,7 @@ window.saveVehicle = async function() {
     }
 };
 
+// ගණනය කිරීම්
 function addDateRangeRow() {
     rangesCount++;
     const container = document.getElementById('dateRangesContainer');
@@ -127,25 +128,21 @@ function addDateRangeRow() {
         <div class="bg-slate-50 p-4 rounded-2xl border border-slate-200 mb-3">
             <div class="grid grid-cols-2 gap-3 mb-3">
                 <div class="flex flex-col">
-                    <label class="text-[10px] font-black text-slate-400 uppercase mb-1 tracking-wider">Date</label>
-                    <input type="text" id="start_date_${rangesCount}" class="w-full border-0 bg-white p-2.5 rounded-xl text-xs font-extrabold shadow-sm" placeholder="Pick Date">
+                    <label class="text-[10px] font-black text-slate-400 uppercase mb-1">Date</label>
+                    <input type="text" id="start_date_${rangesCount}" class="w-full border-0 bg-white p-2.5 rounded-xl text-xs font-bold shadow-sm" placeholder="Select Date">
                 </div>
                 <div class="flex flex-col text-right">
-                    <label class="text-[10px] font-black text-slate-400 uppercase mb-1 tracking-wider">Liters</label>
-                    <input type="number" id="liters_${rangesCount}" step="0.01" placeholder="0.00" class="w-full border-0 bg-white p-2.5 rounded-xl text-xs font-extrabold text-right shadow-sm" oninput="calculateTotalAdjustment()">
+                    <label class="text-[10px] font-black text-slate-400 uppercase mb-1">Liters</label>
+                    <input type="number" id="liters_${rangesCount}" step="0.01" placeholder="0.00" class="w-full border-0 bg-white p-2.5 rounded-xl text-xs font-bold text-right shadow-sm" oninput="calculateTotalAdjustment()">
                 </div>
             </div>
             <div class="flex justify-between items-center border-t border-slate-200 pt-2">
-                <span id="priceInfo_${rangesCount}" class="text-[10px] font-bold text-slate-500 italic">Select date...</span>
+                <span id="priceInfo_${rangesCount}" class="text-[10px] font-bold text-slate-500 italic">...</span>
                 <span class="text-[10px] font-bold text-slate-400 uppercase">Subtotal: <span id="subtotal_${rangesCount}" class="text-xs text-brand-600 font-black">0.00</span></span>
             </div>
         </div>`;
     container.insertAdjacentHTML('beforeend', rowHTML);
-    flatpickr(`#start_date_${rangesCount}`, { 
-        dateFormat: "Y-m-d", 
-        maxDate: "today",
-        onChange: calculateTotalAdjustment 
-    });
+    flatpickr(`#start_date_${rangesCount}`, { dateFormat: "Y-m-d", maxDate: "today", onChange: calculateTotalAdjustment });
 }
 
 function calculateTotalAdjustment() {
@@ -154,16 +151,14 @@ function calculateTotalAdjustment() {
     for (let i = 1; i <= rangesCount; i++) {
         const dVal = document.getElementById(`start_date_${i}`)?.value;
         const lVal = parseFloat(document.getElementById(`liters_${i}`)?.value) || 0;
-        const subEl = document.getElementById(`subtotal_${i}`);
-        const infoEl = document.getElementById(`priceInfo_${i}`);
-
         if (dVal && lVal > 0) {
             const selectedDate = new Date(dVal).getTime();
+            // තෝරාගත් දිනට වලංගු මිල සෙවීම
             const priceEntry = livePrices.find(p => p.rawDate.getTime() <= selectedDate) || livePrices[livePrices.length - 1];
             const diff = priceEntry.price - selectedVehicle.fixedPrice;
             const sub = diff * lVal;
-            if(infoEl) infoEl.innerText = `Price: Rs. ${priceEntry.price}`;
-            if(subEl) subEl.innerText = sub.toLocaleString(undefined, {minimumFractionDigits: 2});
+            document.getElementById(`priceInfo_${i}`).innerText = `Price: Rs. ${priceEntry.price}`;
+            document.getElementById(`subtotal_${i}`).innerText = sub.toLocaleString(undefined, {minimumFractionDigits: 2});
             grandTotal += sub;
         }
     }
