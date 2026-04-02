@@ -11,51 +11,39 @@ let rangesCount = 0;
 async function fetchLiveFuelData() {
     const statusEl = document.getElementById('systemStatus');
     const refreshBtn = document.getElementById('refreshBtn');
-
     if(refreshBtn) {
         const icon = refreshBtn.querySelector('i');
         if(icon) icon.classList.add('fa-spin');
     }
 
     try {
-        const cacheBuster = new Date().getTime();
-        const response = await fetch(`${SHEET_CSV_URL}&t=${cacheBuster}`);
+        const response = await fetch(`${SHEET_CSV_URL}&t=${new Date().getTime()}`);
         const csvData = await response.text();
         
-        // පේළි වලට කඩා හිස් පේළි ඉවත් කිරීම
+        // Data parsing
         const rows = csvData.split('\n')
-            .map(row => row.split(','))
-            .filter(row => row[0] && row[0].trim() !== "" && row[0] !== "Date");
+            .map(row => row.split(',').map(cell => cell.replace(/"/g, '').trim()))
+            .filter(row => row[0] && row[0] !== "Date");
         
-        // ශීට් එකේ යටම තියෙන (අලුත්ම) පේළිය තෝරා ගැනීම
+        // ශීට් එකේ යටම තියෙන අලුත්ම පේළිය ගැනීම
         const latest = rows[rows.length - 1]; 
-        
         if (latest) {
-            const mapPrice = (id, val) => {
-                const el = document.getElementById(id);
-                if(el) el.innerText = val.replace(/"/g, '').trim();
-            };
-            mapPrice('price_lp92', latest[1]);
-            mapPrice('price_lp95', latest[2]);
-            mapPrice('price_lad', latest[3]);
-            mapPrice('price_lsd', latest[4]);
+            if(document.getElementById('price_lp92')) document.getElementById('price_lp92').innerText = latest[1];
+            if(document.getElementById('price_lp95')) document.getElementById('price_lp95').innerText = latest[2];
+            if(document.getElementById('price_lad')) document.getElementById('price_lad').innerText = latest[3];
+            if(document.getElementById('price_lsd')) document.getElementById('price_lsd').innerText = latest[4];
         }
 
-        // හිස්ටරි එක සඳහා සියලුම ඩේටා ගැනීම
         allFuelHistory = rows.map(row => ({
-            date: row[0].replace(/"/g, '').trim(),
+            date: row[0],
             lp92: parseFloat(row[1]) || 0,
             lp95: parseFloat(row[2]) || 0,
             lad: parseFloat(row[3]) || 0,
             lsd: parseFloat(row[4]) || 0
-        }));
-
-        // අලුත්ම එක උඩට එන විදිහට ලිස්ට් එක reverse කිරීම
-        allFuelHistory.reverse();
+        })).reverse();
 
         updateLivePricesUI();
         if (statusEl) statusEl.innerHTML = '<span class="text-green-500 font-black">● LIVE SYNC</span>';
-
     } catch (e) {
         console.error("Fetch Error:", e);
         if (statusEl) statusEl.innerHTML = '<span class="text-red-500 font-bold">OFFLINE</span>';
@@ -87,19 +75,15 @@ function updateLivePricesUI() {
     const current = fuelConfig[selectedFuelType];
     if (titleEl) titleEl.innerText = `Live ${current.title} Prices`;
 
-    let tabsHTML = `
-        <div class="flex justify-center gap-2 mb-4">
-            ${Object.keys(fuelConfig).map(key => `
-                <button onclick="setFuelTab('${key}')" 
-                    class="px-3 py-1.5 rounded-xl text-[10px] font-black transition-all border
-                    ${selectedFuelType === key 
-                        ? 'bg-slate-800 border-slate-800 text-white' 
-                        : 'bg-white border-slate-100 text-slate-400' }">
-                    ${fuelConfig[key].name}
-                </button>
-            `).join('')}
-        </div>
-    `;
+    let tabsHTML = `<div class="flex justify-center gap-2 mb-4">
+        ${Object.keys(fuelConfig).map(key => `
+            <button onclick="setFuelTab('${key}')" 
+                class="px-3 py-1.5 rounded-xl text-[10px] font-black transition-all border
+                ${selectedFuelType === key ? 'bg-slate-800 border-slate-800 text-white' : 'bg-white border-slate-100 text-slate-400' }">
+                ${fuelConfig[key].name}
+            </button>
+        `).join('')}
+    </div>`;
 
     let rowsHTML = allFuelHistory.slice(0, 6).map(entry => `
         <div class="flex items-center justify-between p-3 bg-white border border-slate-100 rounded-2xl mb-2 shadow-sm">
@@ -116,7 +100,17 @@ function updateLivePricesUI() {
     list.innerHTML = tabsHTML + rowsHTML;
 }
 
-// වාහන සහ Calculator ලොජික් (පෙනුම වෙනස් නොකරයි)
+// Global functions for buttons
+window.saveVehicle = async function() {
+    const plate = document.getElementById('vehPlateInput')?.value.trim();
+    const price = parseFloat(document.getElementById('vehFixedPriceInput')?.value);
+    if (plate && !isNaN(price)) {
+        await db.vehicles.add({ plateNo: plate.toUpperCase(), fixedPrice: price });
+        document.getElementById('vehicleModal')?.classList.add('hidden');
+        loadVehicles();
+    }
+};
+
 async function loadVehicles() {
     const vehicles = await db.vehicles.toArray();
     const list = document.getElementById('vehicleList');
@@ -124,98 +118,66 @@ async function loadVehicles() {
     list.innerHTML = vehicles.length ? '' : '<p class="text-xs text-center text-slate-400 py-4 italic">No vehicles added.</p>';
     vehicles.forEach(v => {
         const isActive = (selectedVehicle?.id === v.id);
-        list.innerHTML += `
-            <div onclick="selectVehicle(${v.id})" class="p-4 mb-2 rounded-2xl border-2 transition-all cursor-pointer ${isActive ? 'border-blue-500 bg-blue-50' : 'border-white bg-white shadow-sm'}">
-                <div class="flex justify-between items-center uppercase font-black text-[10px]">
-                    <span>${v.plateNo}</span>
-                    <span class="text-slate-400 font-mono">Rs. ${v.fixedPrice}</span>
-                </div>
-            </div>`;
+        list.innerHTML += `<div onclick="selectVehicle(${v.id})" class="p-4 mb-2 rounded-2xl border-2 cursor-pointer ${isActive ? 'border-blue-500 bg-blue-50' : 'border-white bg-white shadow-sm'}">
+            <div class="flex justify-between items-center uppercase font-black text-[10px]">
+                <span>${v.plateNo}</span>
+                <span class="text-slate-400">Rs. ${v.fixedPrice}</span>
+            </div>
+        </div>`;
     });
 }
 
-async function selectVehicle(id) {
+window.selectVehicle = async function(id) {
     selectedVehicle = await db.vehicles.get(id);
-    const label = document.getElementById('activeVehicleLabel');
-    if(label) label.innerText = selectedVehicle.plateNo;
-    const calc = document.getElementById('calculatorPanel');
-    if(calc) calc.classList.remove('hidden');
+    if(document.getElementById('activeVehicleLabel')) document.getElementById('activeVehicleLabel').innerText = selectedVehicle.plateNo;
+    document.getElementById('calculatorPanel')?.classList.remove('hidden');
     loadVehicles(); clearAllRanges(); addDateRangeRow();
-}
-
-window.saveVehicle = async function() {
-    const plate = document.getElementById('vehPlateInput')?.value.trim();
-    const price = parseFloat(document.getElementById('vehFixedPriceInput')?.value);
-    if (plate && !isNaN(price)) {
-        await db.vehicles.add({ plateNo: plate.toUpperCase(), fixedPrice: price });
-        const modal = document.getElementById('vehicleModal');
-        if(modal) modal.classList.add('hidden');
-        loadVehicles();
-        document.getElementById('vehPlateInput').value = '';
-        document.getElementById('vehFixedPriceInput').value = '';
-    }
 };
 
-function addDateRangeRow() {
+window.addDateRangeRow = function() {
     rangesCount++;
     const container = document.getElementById('dateRangesContainer');
     if(!container) return;
-    const rowHTML = `
-        <div class="bg-white p-4 rounded-2xl border border-slate-100 mb-2">
-            <div class="grid grid-cols-2 gap-2 mb-2">
-                <input type="text" id="start_date_${rangesCount}" class="bg-slate-50 p-2 rounded-xl text-xs font-bold border-0" placeholder="Date">
-                <input type="number" id="liters_${rangesCount}" step="0.01" class="bg-slate-50 p-2 rounded-xl text-xs font-bold text-right border-0" placeholder="Liters" oninput="calculateTotalAdjustment()">
-            </div>
-            <div class="flex justify-between items-center text-[9px] font-black text-slate-400">
-                <span id="priceInfo_${rangesCount}">Market: --</span>
-                <span>Sub: Rs. <span id="subtotal_${rangesCount}" class="text-blue-600 font-mono">0.00</span></span>
-            </div>
-        </div>`;
+    const rowHTML = `<div class="bg-white p-4 rounded-2xl border border-slate-100 mb-2">
+        <div class="grid grid-cols-2 gap-2 mb-2">
+            <input type="text" id="start_date_${rangesCount}" class="bg-slate-50 p-2 rounded-xl text-xs font-bold border-0" placeholder="Date">
+            <input type="number" id="liters_${rangesCount}" step="0.01" class="bg-slate-50 p-2 rounded-xl text-xs font-bold text-right border-0" placeholder="Liters" oninput="calculateTotalAdjustment()">
+        </div>
+        <div class="flex justify-between items-center text-[9px] font-black text-slate-400">
+            <span id="priceInfo_${rangesCount}">Rate: --</span>
+            <span>Sub: Rs. <span id="subtotal_${rangesCount}" class="text-blue-600">0.00</span></span>
+        </div>
+    </div>`;
     container.insertAdjacentHTML('beforeend', rowHTML);
     flatpickr(`#start_date_${rangesCount}`, { dateFormat: "Y-m-d", maxDate: "today", onChange: calculateTotalAdjustment });
-}
+};
 
-function calculateTotalAdjustment() {
+window.calculateTotalAdjustment = function() {
     if (!selectedVehicle) return;
     let grandTotal = 0;
-    // History එකේ මුල් පිළිවෙළටම (ascending) අවශ්‍යයි Calculate කරන්න
-    const chronologicalHistory = [...allFuelHistory].reverse();
-    
+    const chronHistory = [...allFuelHistory].reverse();
     for (let i = 1; i <= rangesCount; i++) {
         const dVal = document.getElementById(`start_date_${i}`)?.value;
         const lVal = parseFloat(document.getElementById(`liters_${i}`)?.value) || 0;
         if (dVal && lVal > 0) {
-            // තෝරාගත් දිනට ගැලපෙන මිල සෙවීම
-            const entry = chronologicalHistory.find(p => p.date <= dVal) || chronologicalHistory[chronologicalHistory.length - 1];
+            const entry = chronHistory.find(p => p.date <= dVal) || chronHistory[chronHistory.length - 1];
             const diff = entry.lp92 - selectedVehicle.fixedPrice;
             const sub = diff * lVal;
-            
-            const info = document.getElementById(`priceInfo_${i}`);
-            if(info) info.innerText = `Rate: Rs. ${entry.lp92}`;
-            const subEl = document.getElementById(`subtotal_${i}`);
-            if(subEl) subEl.innerText = sub.toFixed(2);
+            if(document.getElementById(`priceInfo_${i}`)) document.getElementById(`priceInfo_${i}`).innerText = `Rate: Rs. ${entry.lp92}`;
+            if(document.getElementById(`subtotal_${i}`)) document.getElementById(`subtotal_${i}`).innerText = sub.toFixed(2);
             grandTotal += sub;
         }
     }
-    const totalEl = document.getElementById('totalAdjustmentValue');
-    if(totalEl) totalEl.innerText = grandTotal.toLocaleString(undefined, {minimumFractionDigits: 2});
-}
+    if(document.getElementById('totalAdjustmentValue')) document.getElementById('totalAdjustmentValue').innerText = grandTotal.toLocaleString(undefined, {minimumFractionDigits: 2});
+};
 
-function clearAllRanges() { 
-    const container = document.getElementById('dateRangesContainer');
-    if(container) container.innerHTML = ''; 
-    rangesCount = 0; 
-    const totalEl = document.getElementById('totalAdjustmentValue');
-    if(totalEl) totalEl.innerText = '0.00'; 
-}
+window.clearAllRanges = function() {
+    if(document.getElementById('dateRangesContainer')) document.getElementById('dateRangesContainer').innerHTML = '';
+    rangesCount = 0;
+    if(document.getElementById('totalAdjustmentValue')) document.getElementById('totalAdjustmentValue').innerText = '0.00';
+};
 
-window.onload = () => {
+window.addEventListener('DOMContentLoaded', () => {
     fetchLiveFuelData();
     loadVehicles();
-    const refreshBtn = document.getElementById('refreshBtn');
-    if(refreshBtn) refreshBtn.onclick = (e) => { e.preventDefault(); fetchLiveFuelData(); };
-    const addBtn = document.getElementById('addRangeBtn');
-    if(addBtn) addBtn.onclick = addDateRangeRow;
-    const clearBtn = document.getElementById('clearAllRangesBtn');
-    if(clearBtn) clearBtn.onclick = clearAllRanges;
-};
+});
