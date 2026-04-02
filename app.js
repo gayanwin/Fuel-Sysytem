@@ -1,12 +1,11 @@
 /**
- * Fuel Price Adjustment System - Real-time Live Sync (Final)
- * Developer: Gayan Chinthaka (NWSDB)
+ * Fuel Price Adjustment System - Auto-Sync Edition
+ * Source: Direct Live Fetch via Proxy
  */
 
 const db = new Dexie('FuelSystemDB');
 db.version(1).stores({
-    vehicles: '++id, plateNo, fixedPrice',
-    calculations: '++id, vehicleId, adjustment, createdAt'
+    vehicles: '++id, plateNo, fixedPrice'
 });
 
 let livePrices = []; 
@@ -14,57 +13,47 @@ let currentPricesObj = { lp92: 0, lp95: 0, lad: 0, lsd: 0 };
 let selectedVehicle = null;
 let rangesCount = 0;
 
-// 1. ඍජුවම Live Data ලබාගැනීම
+// 1. මේක තමයි මැජික් එක - CORS Proxy එකක් හරහා කෙලින්ම Data Fetch කරනවා
 async function fetchLiveFuelData() {
-    console.log("Fetching Live Prices...");
     const statusEl = document.getElementById('systemStatus');
     const lockScreen = document.getElementById('offlineLock');
     
-    // මම මේ පාවිච්චි කරන්නේ ලංකාවේ මිල ගණන් වේගයෙන්ම අප්ඩේට් වන සහ Block නොවන API එකක්
-    const apiUrl = 'https://api.helasiri.lk/fuel-prices/v1/latest';
+    // මේ Proxy එක හරහා අපිට ඕනෑම සයිට් එකක දත්ත Block වෙන්නේ නැතුව ගන්න පුළුවන්
+    const proxy = 'https://api.allorigins.win/get?url=';
+    const target = encodeURIComponent('https://raw.githubusercontent.com/Arunoda/fuel-price-lk/main/data.json');
     
     try {
-        const response = await fetch(apiUrl, { 
-            method: 'GET',
-            headers: { 'Accept': 'application/json' }
-        });
-        
-        if (!response.ok) throw new Error("API Connection Failed");
-        const data = await response.json();
+        const response = await fetch(proxy + target);
+        const json = await response.json();
+        const data = JSON.parse(json.contents); // Proxy එකෙන් එන දත්ත Parse කරනවා
 
-        // මිල ඉතිහාසය සැකසීම (Latest 2026.03.22 ඇතුළුව)
-        livePrices = data.history.lp92.map(h => ({
+        // 92 Octane History & Current
+        livePrices = data.petrol92.history.map(h => ({
             date: h.date,
             price: parseFloat(h.price),
             rawDate: new Date(h.date)
         })).sort((a, b) => b.rawDate - a.rawDate);
 
-        // වත්මන් මිල ගණන්
         currentPricesObj = {
-            lp92: parseFloat(data.current.lp92),
-            lp95: parseFloat(data.current.lp95),
-            lad: parseFloat(data.current.lad),
-            lsd: parseFloat(data.current.lsd)
+            lp92: parseFloat(data.petrol92.price),
+            lp95: parseFloat(data.petrol95.price),
+            lad: parseFloat(data.autoDiesel.price),
+            lsd: parseFloat(data.superDiesel.price)
         };
 
         updateTopWidgets();
         updateLivePricesUI();
         
-        if (statusEl) {
-            statusEl.innerHTML = '<div class="flex items-center gap-2 px-3 py-1 bg-green-50 text-green-700 rounded-full border border-green-200 text-[10px] font-bold shadow-sm"><span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span> LIVE SYNC ACTIVE</div>';
-        }
+        if (statusEl) statusEl.innerHTML = '<div class="px-3 py-1 bg-green-50 text-green-700 rounded-full border border-green-200 text-[10px] font-bold animate-pulse">LIVE SYNC ACTIVE</div>';
         if (lockScreen) lockScreen.classList.add('hidden');
-        console.log("Live Sync Successful");
 
     } catch (e) {
-        console.error("Critical Sync Error:", e);
-        if (statusEl) statusEl.innerHTML = '<span class="text-red-500 font-bold text-xs">SYNC FAILED - REFRESHING...</span>';
-        // තත්පර 5කින් නැවත උත්සාහ කරයි
-        setTimeout(fetchLiveFuelData, 5000);
+        console.error("Fetch Error:", e);
+        if (statusEl) statusEl.innerHTML = '<span class="text-red-500 font-bold text-[10px]">RETRYING...</span>';
+        setTimeout(fetchLiveFuelData, 5000); // Fail වුණොත් ආයෙත් ට්‍රයි කරනවා
     }
 }
 
-// 2. UI Updates
 function updateTopWidgets() {
     document.getElementById('price_lp92').innerText = currentPricesObj.lp92.toFixed(0);
     document.getElementById('price_lp95').innerText = currentPricesObj.lp95.toFixed(0);
@@ -76,12 +65,12 @@ function updateLivePricesUI() {
     const list = document.getElementById('priceHistoryList');
     if (!list) return;
     list.innerHTML = '';
-    livePrices.slice(0, 6).forEach((entry) => {
+    livePrices.slice(0, 5).forEach((entry) => {
         list.innerHTML += `
             <div class="flex items-center justify-between p-3 mb-2 rounded-xl border border-slate-100 bg-white shadow-sm">
                 <div class="flex flex-col">
                     <span class="text-[9px] font-black text-slate-400 uppercase tracking-wider">${entry.date}</span>
-                    <span class="text-xs font-bold text-slate-700">Lanka Petrol 92</span>
+                    <span class="text-xs font-bold text-slate-700 leading-tight">Lanka Petrol 92</span>
                 </div>
                 <div class="bg-brand-50 px-3 py-1 rounded-lg border border-brand-100">
                     <span class="text-sm font-black text-brand-600">Rs. ${entry.price}</span>
@@ -90,15 +79,18 @@ function updateLivePricesUI() {
     });
 }
 
-// 3. Vehicle & Calculation Management
+// වාහන කළමනාකරණය
 async function loadVehicles() {
     const vehicles = await db.vehicles.toArray();
     const list = document.getElementById('vehicleList');
     if (!list) return;
-    list.innerHTML = vehicles.length ? '' : '<p class="text-xs text-center text-slate-400 py-4 italic">No vehicles.</p>';
+    list.innerHTML = vehicles.length ? '' : '<p class="text-xs text-center text-slate-400 py-4 italic">Add a vehicle to start.</p>';
     vehicles.forEach(v => {
         const isActive = (selectedVehicle?.id === v.id);
-        list.innerHTML += `<div onclick="selectVehicle(${v.id})" class="p-3 mb-2 rounded-xl border-2 cursor-pointer transition-all ${isActive ? 'border-brand-500 bg-brand-50' : 'border-slate-100 bg-white'}"><span class="block text-sm font-black text-slate-800 uppercase">${v.plateNo}</span></div>`;
+        list.innerHTML += `
+            <div onclick="selectVehicle(${v.id})" class="p-3 mb-2 rounded-xl border-2 transition-all cursor-pointer ${isActive ? 'border-brand-500 bg-brand-50' : 'border-slate-100 bg-white'}">
+                <span class="text-sm font-black text-slate-800 uppercase">${v.plateNo}</span>
+            </div>`;
     });
 }
 
@@ -127,18 +119,18 @@ function addDateRangeRow() {
     const container = document.getElementById('dateRangesContainer');
     const rowHTML = `
         <div class="bg-slate-50 p-4 rounded-2xl border border-slate-200 mb-3">
-            <div class="grid grid-cols-2 gap-3">
+            <div class="grid grid-cols-2 gap-3 mb-3">
                 <div>
                     <label class="text-[10px] font-black text-slate-400 uppercase">Date</label>
-                    <input type="text" id="start_date_${rangesCount}" class="w-full border-0 bg-white p-2.5 rounded-xl text-xs font-bold shadow-sm" placeholder="Select">
+                    <input type="text" id="start_date_${rangesCount}" class="w-full border-0 bg-white p-2.5 rounded-xl text-xs font-bold" placeholder="Select">
                 </div>
                 <div class="text-right">
                     <label class="text-[10px] font-black text-slate-400 uppercase">Liters</label>
-                    <input type="number" id="liters_${rangesCount}" step="0.01" class="w-full border-0 bg-white p-2.5 rounded-xl text-xs font-bold text-right shadow-sm" oninput="calculateTotalAdjustment()">
+                    <input type="number" id="liters_${rangesCount}" step="0.01" class="w-full border-0 bg-white p-2.5 rounded-xl text-xs font-bold text-right" oninput="calculateTotalAdjustment()">
                 </div>
             </div>
-            <div class="flex justify-between items-center mt-2 pt-2 border-t border-slate-200">
-                <span id="priceInfo_${rangesCount}" class="text-[10px] font-bold text-slate-400 italic">...</span>
+            <div class="flex justify-between items-center border-t border-slate-200 pt-2">
+                <span id="priceInfo_${rangesCount}" class="text-[10px] font-bold text-slate-500 italic">...</span>
                 <span id="subtotal_${rangesCount}" class="text-xs text-brand-600 font-black">0.00</span>
             </div>
         </div>`;
@@ -158,14 +150,18 @@ function calculateTotalAdjustment() {
             const diff = priceEntry.price - selectedVehicle.fixedPrice;
             const sub = diff * lVal;
             document.getElementById(`priceInfo_${i}`).innerText = `Price: Rs. ${priceEntry.price}`;
-            document.getElementById(`subtotal_${i}`).innerText = sub.toLocaleString(undefined, {minimumFractionDigits: 2});
+            document.getElementById(`subtotal_${i}`).innerText = sub.toFixed(2);
             grandTotal += sub;
         }
     }
     document.getElementById('totalAdjustmentValue').innerText = grandTotal.toLocaleString(undefined, {minimumFractionDigits: 2});
 }
 
-function clearAllRanges() { document.getElementById('dateRangesContainer').innerHTML = ''; rangesCount = 0; document.getElementById('totalAdjustmentValue').innerText = '0.00'; }
+function clearAllRanges() { 
+    document.getElementById('dateRangesContainer').innerHTML = ''; 
+    rangesCount = 0; 
+    document.getElementById('totalAdjustmentValue').innerText = '0.00'; 
+}
 
 window.onload = () => {
     fetchLiveFuelData();
