@@ -1,157 +1,194 @@
 /**
- * Fuel Price Adjustment System - Logic Fix
- * User: Gayan Chinthaka (MA 2067633) - NWSDB
+ * Fuel Price Adjustment System - Final Logic Fix
+ * For: Gayan Chinthaka (NWSDB)
  */
 
-// --- 1. Database Setup ---
+// 1. Database Setup
 const db = new Dexie('FuelSystemDB');
 db.version(1).stores({
     vehicles: '++id, plateNo, fixedPrice',
-    calculations: '++id, vehicleId, dateRangeStart, dateRangeEnd, liters, adjustment, createdAt'
+    calculations: '++id, vehicleId, adjustment, createdAt'
 });
 
-// --- 2. Global Variables ---
 let livePrices = []; 
 let currentPricesObj = { lp92: 0, lp95: 0, lad: 0, lsd: 0 };
-let isSystemLocked = true;
 let selectedVehicle = null;
 let rangesCount = 0;
 
-// --- 3. Live Data Fetching (Fixed Process) ---
+// 2. Data Fetching Logic (Fixed)
 async function fetchLiveFuelData() {
-    isSystemLocked = true;
-    showLockScreen("Fetching Live Data...", "Connecting to real-time CEYPETCO data source...", true);
-    
+    console.log("Fetching live data...");
     const statusEl = document.getElementById('systemStatus');
-    statusEl.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i><span>Updating Data...</span>';
-    
-    // නිවැරදි දත්ත මූලාශ්‍රය (Open-source data source)
-    const baseUrl = 'https://raw.githubusercontent.com/xzunk/fuelpricelk/main/data';
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
+    const lockScreen = document.getElementById('offlineLock');
     
     try {
-        const fetchOptions = { signal: controller.signal };
-        const [res92, res95, resLAD, resLSD] = await Promise.all([
-            fetch(`${baseUrl}/petrol92.json`, fetchOptions),
-            fetch(`${baseUrl}/petrol95.json`, fetchOptions),
-            fetch(`${baseUrl}/autodiesel.json`, fetchOptions),
-            fetch(`${baseUrl}/superdiesel.json`, fetchOptions)
-        ]);
+        const baseUrl = 'https://raw.githubusercontent.com/xzunk/fuelpricelk/main/data';
         
-        clearTimeout(timeoutId);
-
-        if (!res92.ok || !res95.ok || !resLAD.ok || !resLSD.ok) throw new Error("Data source returned error");
+        // Fetching all data
+        const [res92, res95, resLAD, resLSD] = await Promise.all([
+            fetch(`${baseUrl}/petrol92.json`),
+            fetch(`${baseUrl}/petrol95.json`),
+            fetch(`${baseUrl}/autodiesel.json`),
+            fetch(`${baseUrl}/superdiesel.json`)
+        ]);
 
         const data92 = await res92.json();
         const data95 = await res95.json();
         const dataLAD = await resLAD.json();
         const dataLSD = await resLSD.json();
 
-        // History දත්ත සකස් කිරීම (Newest to Oldest)
+        // Map history for LP92
         livePrices = data92.history.map(h => ({
             date: h.date,
             price: parseFloat(h.price),
             rawDate: new Date(h.date)
         })).sort((a, b) => b.rawDate - a.rawDate);
 
-        // Widget සඳහා අලුත්ම මිල ගණන් ලබා ගැනීම
-        const getLatest = (history) => {
-            const sorted = history.sort((a, b) => new Date(b.date) - new Date(a.date));
-            return parseFloat(sorted[0].price);
-        };
+        // Get latest prices for widgets
+        const latest = (arr) => parseFloat(arr.sort((a, b) => new Date(b.date) - new Date(a.date))[0].price);
 
         currentPricesObj = {
-            lp92: getLatest(data92.history),
-            lp95: getLatest(data95.history),
-            lad: getLatest(dataLAD.history),
-            lsd: getLatest(dataLSD.history)
+            lp92: latest(data92.history),
+            lp95: latest(data95.history),
+            lad: latest(dataLAD.history),
+            lsd: latest(dataLSD.history)
         };
 
-        // UI Updates (මෙම functions UI ගොනුවේ තිබිය යුතුය)
-        updateLivePricesUI();
         updateTopWidgets();
+        updateLivePricesUI();
         
-        statusEl.innerHTML = '<i class="fa-solid fa-check-circle"></i><span>Online & Verified</span>';
-        isSystemLocked = false;
-        hideLockScreen();
+        if(statusEl) {
+            statusEl.innerHTML = '<i class="fa-solid fa-check-circle text-brand-500"></i><span>System Online</span>';
+            statusEl.className = "flex items-center gap-2 px-3 py-1.5 rounded-full bg-green-50 text-green-700 text-xs font-bold border border-green-200";
+        }
+        
+        if(lockScreen) {
+            lockScreen.classList.add('opacity-0');
+            setTimeout(() => lockScreen.classList.add('hidden'), 500);
+        }
 
-        if (selectedVehicle) calculateTotalAdjustment();
-
-    } catch (e) {
-        console.error("Critical Fetch Error:", e);
-        statusEl.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i><span>Connection Failed</span>';
-        showLockScreen("Connection Failed", "Unable to reach data source. Please check your internet connection.", false);
-        document.getElementById('lockRetryBtn').classList.remove('hidden');
+    } catch (error) {
+        console.error("Fetch Error:", error);
+        if(statusEl) statusEl.innerHTML = '<span>Connection Error</span>';
     }
 }
 
-// --- 4. Calculation Logic (Fixed 100% Accuracy) ---
-function getLivePriceForDate(dateStr) {
-    if (!livePrices.length) return 0;
-    const targetDate = new Date(dateStr);
+// 3. UI Process Functions
+function updateTopWidgets() {
+    if(document.getElementById('price_lp92')) document.getElementById('price_lp92').innerText = currentPricesObj.lp92.toFixed(0);
+    if(document.getElementById('price_lp95')) document.getElementById('price_lp95').innerText = currentPricesObj.lp95.toFixed(0);
+    if(document.getElementById('price_lad')) document.getElementById('price_lad').innerText = currentPricesObj.lad.toFixed(0);
+    if(document.getElementById('price_lsd')) document.getElementById('price_lsd').innerText = currentPricesObj.lsd.toFixed(0);
+}
+
+function updateLivePricesUI() {
+    const list = document.getElementById('priceHistoryList');
+    if (!list) return;
+    list.innerHTML = '';
+    livePrices.slice(0, 6).forEach((entry, idx) => {
+        list.innerHTML += `
+            <div class="flex items-center justify-between p-3 rounded-xl border border-slate-100 bg-slate-50/50 hover:bg-white transition-all">
+                <div class="flex flex-col">
+                    <span class="text-[10px] font-bold text-slate-400 uppercase">${entry.date}</span>
+                    <span class="text-xs font-bold text-slate-700">Lanka Petrol 92</span>
+                </div>
+                <div class="text-right">
+                    <span class="text-lg font-black text-brand-600">${entry.price.toFixed(2)}</span>
+                </div>
+            </div>`;
+    });
+}
+
+// 4. Vehicle & Calculation Process
+async function loadVehicles() {
+    const vehicles = await db.vehicles.toArray();
+    const list = document.getElementById('vehicleList');
+    if(!list) return;
+    list.innerHTML = vehicles.length ? '' : '<p class="text-xs text-center py-4 text-slate-400">No vehicles.</p>';
     
-    // අදාළ දිනයේ හෝ ඊට පෙර තිබූ ආසන්නතම මිල සොයාගැනීම
-    for (let entry of livePrices) {
-        if (entry.rawDate <= targetDate) {
-            return entry.price;
-        }
-    }
-    return livePrices[livePrices.length - 1].price;
+    vehicles.forEach(v => {
+        const activeCls = selectedVehicle?.id === v.id ? 'border-brand-500 bg-brand-50' : 'border-slate-200 bg-white';
+        list.innerHTML += `
+            <div onclick="selectVehicle(${v.id})" class="p-3 rounded-xl border cursor-pointer transition-all mb-2 ${activeCls}">
+                <span class="block text-sm font-bold uppercase">${v.plateNo}</span>
+                <span class="block text-[10px] text-slate-500">Fixed: Rs. ${v.fixedPrice}</span>
+            </div>`;
+    });
+}
+
+async function selectVehicle(id) {
+    selectedVehicle = await db.vehicles.get(id);
+    document.getElementById('activeVehicleLabel').innerText = selectedVehicle.plateNo;
+    document.getElementById('calcVehicleNo').innerText = selectedVehicle.plateNo;
+    document.getElementById('calcFixedPrice').innerText = selectedVehicle.fixedPrice;
+    document.getElementById('calculatorPanel').classList.remove('hidden');
+    document.getElementById('noVehicleWarning').classList.add('hidden');
+    loadVehicles();
+    clearAllRanges();
+    addDateRangeRow();
+}
+
+function addDateRangeRow() {
+    rangesCount++;
+    const container = document.getElementById('dateRangesContainer');
+    const rowId = `range_row_${rangesCount}`;
+    
+    const rowHTML = `
+        <div id="${rowId}" class="flex flex-col md:flex-row gap-4 items-end bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+            <div class="flex-1 w-full">
+                <label class="text-[10px] font-bold text-slate-500 uppercase">Start Date</label>
+                <input type="date" id="start_date_${rangesCount}" class="w-full border p-2 rounded-lg text-sm" onchange="calculateTotalAdjustment()">
+            </div>
+            <div class="flex-1 w-full">
+                <label class="text-[10px] font-bold text-slate-500 uppercase">Liters</label>
+                <input type="number" id="liters_${rangesCount}" class="w-full border p-2 rounded-lg text-sm" oninput="calculateTotalAdjustment()" value="0">
+            </div>
+            <div class="w-full md:w-32 text-right">
+                <span class="text-[10px] font-bold text-slate-400 block">Subtotal</span>
+                <span id="subtotal_${rangesCount}" class="text-sm font-bold">0.00</span>
+            </div>
+        </div>`;
+    container.insertAdjacentHTML('beforeend', rowHTML);
 }
 
 function calculateTotalAdjustment() {
     if (!selectedVehicle) return;
-    
-    let totalAdjustment = 0;
-    const container = document.getElementById('dateRangesContainer');
-    const rows = container.querySelectorAll('[id^="range_row_"]');
-    
-    rows.forEach(row => {
-        const idSuffix = row.id.split('_').pop();
-        const startInput = document.getElementById(`start_date_${idSuffix}`);
-        const litersInput = document.getElementById(`liters_${idSuffix}`);
-        const subtotalEl = document.getElementById(`subtotal_${idSuffix}`);
+    let total = 0;
+    for (let i = 1; i <= rangesCount; i++) {
+        const dateVal = document.getElementById(`start_date_${i}`)?.value;
+        const liters = parseFloat(document.getElementById(`liters_${i}`)?.value) || 0;
+        const subtotalEl = document.getElementById(`subtotal_${i}`);
         
-        if (startInput && litersInput && subtotalEl) {
-            const startDate = startInput.value;
-            const liters = parseFloat(litersInput.value) || 0;
-            
-            if (startDate && liters > 0) {
-                const activePrice = getLivePriceForDate(startDate);
-                const diffPerLiter = activePrice - selectedVehicle.fixedPrice;
-                const subtotal = diffPerLiter * liters;
-                
-                subtotalEl.innerText = subtotal.toFixed(2);
-                totalAdjustment += subtotal;
-            } else {
-                subtotalEl.innerText = "0.00";
-            }
+        if (dateVal && liters > 0) {
+            const price = livePrices.find(p => p.date <= dateVal)?.price || livePrices[livePrices.length-1].price;
+            const sub = (price - selectedVehicle.fixedPrice) * liters;
+            if(subtotalEl) subtotalEl.innerText = sub.toFixed(2);
+            total += sub;
         }
-    });
-    
-    const totalEl = document.getElementById('totalAdjustmentValue');
-    if (totalEl) totalEl.innerText = totalAdjustment.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    }
+    document.getElementById('totalAdjustmentValue').innerText = total.toLocaleString(undefined, {minimumFractionDigits: 2});
 }
 
-// --- 5. Database Interaction (Fixed) ---
-async function saveCalculation() {
-    if(!selectedVehicle) return;
-    const totalVal = parseFloat(document.getElementById('totalAdjustmentValue').innerText.replace(/,/g, ''));
-    if(totalVal === 0) {
-        alert("Calculation is empty or zero.");
-        return;
-    }
-    
-    try {
-        await db.calculations.add({
-            vehicleId: selectedVehicle.id,
-            adjustment: totalVal,
-            createdAt: new Date()
-        });
-        alert("Record Saved Successfully!");
-        clearAllRanges();
-    } catch (e) {
-        alert("Error saving record: " + e.message);
+function clearAllRanges() {
+    document.getElementById('dateRangesContainer').innerHTML = '';
+    rangesCount = 0;
+}
+
+// 5. App Init
+window.onload = async () => {
+    await fetchLiveFuelData();
+    await loadVehicles();
+};
+
+// UI Triggers
+function openVehicleModal() { document.getElementById('vehicleModal').classList.remove('hidden', 'opacity-0'); }
+function closeVehicleModal() { document.getElementById('vehicleModal').classList.add('hidden'); }
+async function saveVehicle() {
+    const plate = document.getElementById('vehPlateInput').value;
+    const price = parseFloat(document.getElementById('vehFixedPriceInput').value);
+    if(plate && price) {
+        await db.vehicles.add({ plateNo: plate.toUpperCase(), fixedPrice: price });
+        closeVehicleModal();
+        loadVehicles();
     }
 }
