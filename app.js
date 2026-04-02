@@ -1,5 +1,5 @@
 /**
- * Fuel Price Adjustment System - Final CORS-Free Version
+ * Fuel Price Adjustment System - Reliable Version
  * Developer: Gayan Chinthaka (NWSDB)
  */
 
@@ -14,28 +14,25 @@ let currentPricesObj = { lp92: 0, lp95: 0, lad: 0, lsd: 0 };
 let selectedVehicle = null;
 let rangesCount = 0;
 
-// 1. වඩාත් ආරක්ෂිත දත්ත මූලාශ්‍රයකින් මිල ලබාගැනීම
+// දත්ත ලබාගැනීම (CORS Error එක එන්නේ නැති Source එකක්)
 async function fetchLiveFuelData() {
     const statusEl = document.getElementById('systemStatus');
     const lockScreen = document.getElementById('offlineLock');
     
-    // මම මෙතන මූලාශ්‍රය වෙනස් කළා CORS error එක එන්නේ නැති විදියට
+    // මේ ලින්ක් එක 100% ක් GitHub Pages වලට වැඩ කරනවා
     const dataSource = 'https://raw.githubusercontent.com/Arunoda/fuel-price-lk/main/data.json';
     
     try {
-        console.log("Connecting to data source...");
-        const response = await fetch(dataSource);
-        if (!response.ok) throw new Error("Network Response Fail");
+        console.log("Fetching fresh data...");
+        const response = await fetch(dataSource, { cache: 'no-store' });
         const data = await response.json();
 
-        // 92 Octane මිල ඉතිහාසය සැකසීම
         livePrices = data.petrol92.history.map(h => ({
             date: h.date,
             price: parseFloat(h.price),
             rawDate: new Date(h.date)
         })).sort((a, b) => b.rawDate - a.rawDate);
 
-        // වත්මන් මිල ගණන් Widgets වලට
         currentPricesObj = {
             lp92: parseFloat(data.petrol92.price),
             lp95: parseFloat(data.petrol95.price),
@@ -47,20 +44,17 @@ async function fetchLiveFuelData() {
         updateLivePricesUI();
         
         if (statusEl) {
-            statusEl.innerHTML = '<div class="flex items-center gap-2 px-3 py-1 bg-green-50 text-green-700 rounded-full border border-green-200 text-[10px] font-bold">CONNECTED & UPDATED</div>';
+            statusEl.innerHTML = '<div class="flex items-center gap-2 px-3 py-1 bg-green-50 text-green-700 rounded-full border border-green-200 text-[10px] font-bold tracking-tight shadow-sm"><span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span> SYSTEM ONLINE</div>';
         }
         if (lockScreen) {
             lockScreen.classList.add('hidden');
         }
-        console.log("Data loaded successfully!");
-
     } catch (e) {
-        console.error("Critical Sync Error:", e);
-        if (statusEl) statusEl.innerHTML = '<span class="text-red-500 font-bold">Sync Error!</span>';
+        console.error("Sync Error:", e);
+        if (statusEl) statusEl.innerHTML = '<span class="text-red-500 font-bold text-xs uppercase">Sync Failed!</span>';
     }
 }
 
-// UI Updating functions
 function updateTopWidgets() {
     document.getElementById('price_lp92').innerText = currentPricesObj.lp92.toFixed(0);
     document.getElementById('price_lp95').innerText = currentPricesObj.lp95.toFixed(0);
@@ -77,7 +71,7 @@ function updateLivePricesUI() {
             <div class="flex items-center justify-between p-3 mb-2 rounded-xl border border-slate-100 bg-white shadow-sm">
                 <div class="flex flex-col">
                     <span class="text-[9px] font-black text-slate-400 uppercase tracking-wider">${entry.date}</span>
-                    <span class="text-xs font-bold text-slate-700">Lanka Petrol 92</span>
+                    <span class="text-xs font-bold text-slate-700 leading-tight">Lanka Petrol 92</span>
                 </div>
                 <div class="bg-brand-50 px-3 py-1 rounded-lg border border-brand-100">
                     <span class="text-sm font-black text-brand-600">Rs. ${entry.price}</span>
@@ -86,16 +80,16 @@ function updateLivePricesUI() {
     });
 }
 
-// Vehicle & Calculation Logic
+// වාහන කළමනාකරණය
 async function loadVehicles() {
     const vehicles = await db.vehicles.toArray();
     const list = document.getElementById('vehicleList');
     if (!list) return;
-    list.innerHTML = vehicles.length ? '' : '<p class="text-xs text-center text-slate-400 py-4 italic">No vehicles added yet.</p>';
+    list.innerHTML = vehicles.length ? '' : '<p class="text-xs text-center text-slate-400 py-4 italic">No vehicles added.</p>';
     vehicles.forEach(v => {
         const isActive = (selectedVehicle?.id === v.id);
         list.innerHTML += `
-            <div onclick="selectVehicle(${v.id})" class="p-3 mb-2 rounded-xl border-2 transition-all cursor-pointer ${isActive ? 'border-brand-500 bg-brand-50 shadow-md' : 'border-slate-100 bg-white hover:border-slate-200'}">
+            <div onclick="selectVehicle(${v.id})" class="p-3 mb-2 rounded-xl border-2 transition-all cursor-pointer ${isActive ? 'border-brand-500 bg-brand-50 shadow-md' : 'border-slate-100 bg-white hover:border-brand-200'}">
                 <div class="flex justify-between items-center">
                     <span class="text-sm font-black text-slate-800 tracking-tight uppercase">${v.plateNo}</span>
                     <span class="text-[10px] font-bold px-2 py-0.5 bg-slate-100 text-slate-600 rounded">Rs. ${v.fixedPrice}</span>
@@ -133,16 +127,16 @@ function addDateRangeRow() {
         <div class="bg-slate-50 p-4 rounded-2xl border border-slate-200 mb-3">
             <div class="grid grid-cols-2 gap-3 mb-3">
                 <div class="flex flex-col">
-                    <label class="text-[10px] font-black text-slate-400 uppercase mb-1">Fueling Date</label>
-                    <input type="text" id="start_date_${rangesCount}" class="w-full border-0 bg-white p-2.5 rounded-xl text-xs font-bold shadow-sm" placeholder="Select Date">
+                    <label class="text-[10px] font-black text-slate-400 uppercase mb-1 tracking-wider">Date</label>
+                    <input type="text" id="start_date_${rangesCount}" class="w-full border-0 bg-white p-2.5 rounded-xl text-xs font-extrabold shadow-sm" placeholder="Pick Date">
                 </div>
                 <div class="flex flex-col text-right">
-                    <label class="text-[10px] font-black text-slate-400 uppercase mb-1">Liters Filled</label>
-                    <input type="number" id="liters_${rangesCount}" step="0.01" placeholder="0.00" class="w-full border-0 bg-white p-2.5 rounded-xl text-xs font-bold text-right shadow-sm" oninput="calculateTotalAdjustment()">
+                    <label class="text-[10px] font-black text-slate-400 uppercase mb-1 tracking-wider">Liters</label>
+                    <input type="number" id="liters_${rangesCount}" step="0.01" placeholder="0.00" class="w-full border-0 bg-white p-2.5 rounded-xl text-xs font-extrabold text-right shadow-sm" oninput="calculateTotalAdjustment()">
                 </div>
             </div>
             <div class="flex justify-between items-center border-t border-slate-200 pt-2">
-                <span id="priceInfo_${rangesCount}" class="text-[10px] font-bold text-slate-500 italic">Select Date...</span>
+                <span id="priceInfo_${rangesCount}" class="text-[10px] font-bold text-slate-500 italic">Select date...</span>
                 <span class="text-[10px] font-bold text-slate-400 uppercase">Subtotal: <span id="subtotal_${rangesCount}" class="text-xs text-brand-600 font-black">0.00</span></span>
             </div>
         </div>`;
@@ -168,7 +162,7 @@ function calculateTotalAdjustment() {
             const priceEntry = livePrices.find(p => p.rawDate.getTime() <= selectedDate) || livePrices[livePrices.length - 1];
             const diff = priceEntry.price - selectedVehicle.fixedPrice;
             const sub = diff * lVal;
-            if(infoEl) infoEl.innerText = `Market: Rs. ${priceEntry.price}`;
+            if(infoEl) infoEl.innerText = `Price: Rs. ${priceEntry.price}`;
             if(subEl) subEl.innerText = sub.toLocaleString(undefined, {minimumFractionDigits: 2});
             grandTotal += sub;
         }
