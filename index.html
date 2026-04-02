@@ -1,135 +1,193 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Fuel Price Adjustment System</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <script src="https://unpkg.com/dexie/dist/dexie.js"></script>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap');
-        body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .animate-fade-in { animation: fadeIn 0.3s ease-out; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-    </style>
-</head>
-<body class="bg-slate-50 text-slate-900 antialiased pb-20">
+const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRFBYTixlf9JHq7oc523FFnWAB4NnGWkAu5Sy6ZNmdr_rHJHPZz7_mJf-XGgW8aT_yIj3Xv4wCnSTsQ/pub?output=csv';
 
-    <header class="bg-white border-b border-slate-200 sticky top-0 z-40 px-4 py-4">
-        <div class="max-w-md mx-auto flex justify-between items-center">
-            <div>
-                <h1 class="text-xl font-black tracking-tighter text-slate-800">FUEL SYSTEM</h1>
-                <div id="systemStatus" class="flex items-center gap-1.5 mt-0.5">
-                    <span class="text-[9px] font-black text-slate-400 uppercase tracking-widest">System Syncing...</span>
-                </div>
-            </div>
-            <div class="flex items-center gap-3">
-                <button id="refreshBtn" class="p-2.5 bg-slate-100 text-slate-600 rounded-2xl hover:bg-blue-50 hover:text-blue-600 transition-all">
-                    <i class="fa-solid fa-arrows-rotate text-sm"></i>
-                </button>
-                <div class="w-10 h-10 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-200">
-                    <i class="fa-solid fa-gas-pump text-white"></i>
-                </div>
-            </div>
-        </div>
-    </header>
+const db = new Dexie('FuelSystemDB');
+db.version(1).stores({ vehicles: '++id, plateNo, fixedPrice' });
 
-    <main class="max-w-md mx-auto p-4 space-y-6">
+let allFuelHistory = [];
+let selectedFuelType = 'lp92'; 
+let selectedVehicle = null;
+let rangesCount = 0;
+
+// 1. දත්ත ලබා ගැනීම (Refresh Button එකටත් මේකම වැඩ කරනවා)
+async function fetchLiveFuelData() {
+    const statusEl = document.getElementById('systemStatus');
+    const refreshBtn = document.getElementById('refreshBtn');
+
+    if(refreshBtn) refreshBtn.querySelector('i').classList.add('fa-spin');
+
+    try {
+        const cacheBuster = new Date().getTime();
+        const response = await fetch(`${SHEET_CSV_URL}&t=${cacheBuster}`);
+        const csvData = await response.text();
+        const rows = csvData.split('\n').map(row => row.split(','));
         
-        <div class="grid grid-cols-2 gap-3">
-            <div class="bg-white p-4 rounded-[2rem] border border-slate-200 shadow-sm">
-                <span class="text-[9px] font-black text-slate-400 uppercase">LP 92</span>
-                <div class="flex items-baseline gap-1 mt-1">
-                    <span class="text-xs font-bold text-slate-400">Rs.</span>
-                    <span id="price_lp92" class="text-2xl font-black text-slate-800">000</span>
-                </div>
+        const latest = rows[1];
+        if (latest) {
+            if(document.getElementById('price_lp92')) document.getElementById('price_lp92').innerText = latest[1];
+            if(document.getElementById('price_lp95')) document.getElementById('price_lp95').innerText = latest[2];
+            if(document.getElementById('price_lad')) document.getElementById('price_lad').innerText = latest[3];
+            if(document.getElementById('price_lsd')) document.getElementById('price_lsd').innerText = latest[4];
+        }
+
+        allFuelHistory = rows.slice(1).map(row => ({
+            date: row[0] ? row[0].trim() : "",
+            lp92: parseFloat(row[1]) || 0,
+            lp95: parseFloat(row[2]) || 0,
+            lad: parseFloat(row[3]) || 0,
+            lsd: parseFloat(row[4]) || 0
+        })).filter(item => item.date !== "");
+
+        updateLivePricesUI();
+        
+        if (statusEl) statusEl.innerHTML = '● LIVE SYNC ACTIVE';
+
+    } catch (e) {
+        console.error("Fetch Error:", e);
+        if (statusEl) statusEl.innerText = 'SYNC ERROR';
+    } finally {
+        if(refreshBtn) refreshBtn.querySelector('i').classList.remove('fa-spin');
+    }
+}
+
+// 2. Tabs මාරු කිරීමේ Function එක
+window.setFuelTab = function(type) {
+    selectedFuelType = type;
+    updateLivePricesUI();
+};
+
+function updateLivePricesUI() {
+    const list = document.getElementById('priceHistoryList');
+    const tabsContainer = document.getElementById('fuelTabs');
+    const titleEl = document.getElementById('fuelTitle');
+
+    if (!list || !tabsContainer) return;
+
+    const fuelConfig = {
+        'lp92': { name: 'LP-92', title: '92 Octane', color: 'blue' },
+        'lp95': { name: 'LP-95', title: '95 Octane', color: 'red' },
+        'lad': { name: 'LAD', title: 'Auto Diesel', color: 'green' },
+        'lsd': { name: 'LSD', title: 'Super Diesel', color: 'orange' }
+    };
+
+    const current = fuelConfig[selectedFuelType];
+
+    // Heading එක වෙනස් කිරීම
+    if (titleEl) titleEl.innerText = `Live ${current.title} Prices`;
+
+    // Tabs ටික මැදට කරලා හදමු
+    tabsContainer.innerHTML = Object.keys(fuelConfig).map(key => `
+        <button onclick="setFuelTab('${key}')" 
+            class="px-3 py-1 text-[10px] font-bold rounded border transition-all
+            ${selectedFuelType === key 
+                ? 'bg-gray-800 border-gray-800 text-white' 
+                : 'bg-white border-gray-200 text-gray-400'}">
+            ${fuelConfig[key].name}
+        </button>
+    `).join('');
+
+    // පේළි 6 පෙන්වීම
+    list.innerHTML = allFuelHistory.slice(0, 6).map(entry => `
+        <div class="flex items-center justify-between p-3 bg-white border border-gray-100 rounded-lg">
+            <div class="flex flex-col">
+                <span class="text-[8px] font-bold text-gray-400 uppercase">${entry.date}</span>
+                <span class="text-[11px] font-bold text-gray-700">${current.name}</span>
             </div>
-            <div class="bg-white p-4 rounded-[2rem] border border-slate-200 shadow-sm">
-                <span class="text-[9px] font-black text-slate-400 uppercase">LP 95</span>
-                <div class="flex items-baseline gap-1 mt-1">
-                    <span class="text-xs font-bold text-slate-400">Rs.</span>
-                    <span id="price_lp95" class="text-2xl font-black text-slate-800">000</span>
-                </div>
-            </div>
-            <div class="bg-white p-4 rounded-[2rem] border border-slate-200 shadow-sm">
-                <span class="text-[9px] font-black text-slate-400 uppercase">LAD</span>
-                <div class="flex items-baseline gap-1 mt-1">
-                    <span class="text-xs font-bold text-slate-400">Rs.</span>
-                    <span id="price_lad" class="text-2xl font-black text-slate-800">000</span>
-                </div>
-            </div>
-            <div class="bg-white p-4 rounded-[2rem] border border-slate-200 shadow-sm">
-                <span class="text-[9px] font-black text-slate-400 uppercase">LSD</span>
-                <div class="flex items-baseline gap-1 mt-1">
-                    <span class="text-xs font-bold text-slate-400">Rs.</span>
-                    <span id="price_lsd" class="text-2xl font-black text-slate-800">000</span>
-                </div>
-            </div>
+            <div class="font-mono font-bold text-sm text-gray-900">Rs. ${entry[selectedFuelType]}</div>
         </div>
+    `).join('');
+}
 
-        <section class="space-y-4">
-            <h3 id="fuelTitle" class="text-sm font-black text-slate-800 uppercase tracking-tight ml-1">Live 92 Octane Prices</h3>
-            <div id="priceHistoryList" class="space-y-2">
+// --- වාහන වැඩ ටික ---
+async function loadVehicles() {
+    const vehicles = await db.vehicles.toArray();
+    const list = document.getElementById('vehicleList');
+    if (!list) return;
+    list.innerHTML = vehicles.length ? '' : '<p class="text-xs text-center text-gray-400 py-4">No vehicles added.</p>';
+    vehicles.forEach(v => {
+        const isActive = (selectedVehicle?.id === v.id);
+        list.innerHTML += `
+            <div onclick="selectVehicle(${v.id})" class="p-3 mb-2 rounded-lg border-2 transition-all cursor-pointer ${isActive ? 'border-blue-500 bg-blue-50' : 'border-gray-100 bg-white'}">
+                <div class="flex justify-between items-center">
+                    <span class="text-sm font-bold uppercase">${v.plateNo}</span>
+                    <span class="text-[10px] text-gray-400">Fixed: Rs. ${v.fixedPrice}</span>
                 </div>
-        </section>
+            </div>`;
+    });
+}
 
-        <section class="space-y-4">
-            <div class="flex justify-between items-center px-1">
-                <h3 class="text-sm font-black text-slate-800 uppercase tracking-tight">Your Vehicles</h3>
-                <button onclick="document.getElementById('vehicleModal').classList.remove('hidden')" class="text-[10px] font-black bg-blue-600 text-white px-4 py-1.5 rounded-full shadow-lg shadow-blue-100">ADD NEW</button>
+async function selectVehicle(id) {
+    selectedVehicle = await db.vehicles.get(id);
+    document.getElementById('activeVehicleLabel').innerText = selectedVehicle.plateNo;
+    document.getElementById('calculatorPanel').classList.remove('hidden');
+    loadVehicles(); clearAllRanges(); addDateRangeRow();
+}
+
+window.saveVehicle = async function() {
+    const plate = document.getElementById('vehPlateInput').value.trim();
+    const price = parseFloat(document.getElementById('vehFixedPriceInput').value);
+    if (plate && !isNaN(price)) {
+        await db.vehicles.add({ plateNo: plate.toUpperCase(), fixedPrice: price });
+        document.getElementById('vehicleModal').classList.add('hidden');
+        loadVehicles();
+        document.getElementById('vehPlateInput').value = '';
+        document.getElementById('vehFixedPriceInput').value = '';
+    }
+};
+
+// --- Calculator වැඩ ටික ---
+function addDateRangeRow() {
+    rangesCount++;
+    const container = document.getElementById('dateRangesContainer');
+    const rowHTML = `
+        <div class="bg-white p-4 rounded-xl border border-gray-200 mb-2">
+            <div class="grid grid-cols-2 gap-2 mb-2">
+                <input type="text" id="start_date_${rangesCount}" class="bg-gray-50 p-2 rounded text-xs font-bold" placeholder="Date">
+                <input type="number" id="liters_${rangesCount}" step="0.01" class="bg-gray-50 p-2 rounded text-xs font-bold text-right" placeholder="Liters" oninput="calculateTotalAdjustment()">
             </div>
-            <div id="vehicleList" class="space-y-3"></div>
-        </section>
-
-        <section id="calculatorPanel" class="hidden animate-fade-in space-y-4 pt-4 border-t border-slate-200">
-            <div class="bg-blue-600 p-6 rounded-[2.5rem] shadow-xl shadow-blue-100 text-white relative overflow-hidden">
-                <div class="relative z-10">
-                    <span class="text-[10px] font-black uppercase opacity-60 tracking-widest">Total Adjustment</span>
-                    <div class="flex items-baseline gap-2 mt-1">
-                        <span class="text-lg font-bold opacity-80">Rs.</span>
-                        <span id="totalAdjustmentValue" class="text-4xl font-black">0.00</span>
-                    </div>
-                    <div class="mt-4 flex items-center gap-2">
-                        <span id="activeVehicleLabel" class="bg-white/20 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-tighter">WP CAD-5050</span>
-                        <span class="text-[10px] font-bold opacity-60">LP 92 Basis</span>
-                    </div>
-                </div>
+            <div class="flex justify-between items-center text-[10px] font-bold text-gray-400">
+                <span id="priceInfo_${rangesCount}">Market: Rs. ---</span>
+                <span>Sub: Rs. <span id="subtotal_${rangesCount}" class="text-blue-600">0.00</span></span>
             </div>
+        </div>`;
+    container.insertAdjacentHTML('beforeend', rowHTML);
+    flatpickr(`#start_date_${rangesCount}`, { dateFormat: "Y-m-d", maxDate: "today", onChange: calculateTotalAdjustment });
+}
 
-            <div id="dateRangesContainer"></div>
+function calculateTotalAdjustment() {
+    if (!selectedVehicle) return;
+    let grandTotal = 0;
+    for (let i = 1; i <= rangesCount; i++) {
+        const dVal = document.getElementById(`start_date_${i}`)?.value;
+        const lVal = parseFloat(document.getElementById(`liters_${i}`)?.value) || 0;
+        if (dVal && lVal > 0) {
+            const entry = allFuelHistory.find(p => p.date <= dVal) || allFuelHistory[allFuelHistory.length - 1];
+            const diff = entry.lp92 - selectedVehicle.fixedPrice;
+            const sub = diff * lVal;
+            document.getElementById(`priceInfo_${i}`).innerText = `Price (92): Rs. ${entry.lp92}`;
+            document.getElementById(`subtotal_${i}`).innerText = sub.toFixed(2);
+            grandTotal += sub;
+        }
+    }
+    document.getElementById('totalAdjustmentValue').innerText = grandTotal.toLocaleString(undefined, {minimumFractionDigits: 2});
+}
 
-            <button id="addRangeBtn" class="w-full py-4 bg-white border-2 border-dashed border-slate-300 rounded-[2rem] text-slate-400 text-xs font-black uppercase hover:bg-slate-50 transition-all flex items-center justify-center gap-2">
-                <i class="fa-solid fa-plus text-[10px]"></i> Add Fueling Date
-            </button>
-            
-            <button id="clearAllRangesBtn" class="w-full py-2 text-slate-400 text-[10px] font-black uppercase tracking-widest">Clear All</button>
-        </section>
-    </main>
+function clearAllRanges() { 
+    document.getElementById('dateRangesContainer').innerHTML = ''; 
+    rangesCount = 0; 
+    document.getElementById('totalAdjustmentValue').innerText = '0.00'; 
+}
 
-    <div id="vehicleModal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
-        <div class="bg-white w-full max-w-md rounded-[2.5rem] p-8 space-y-6 shadow-2xl">
-            <h4 class="text-xl font-black text-slate-800">Add Vehicle</h4>
-            <div class="space-y-4">
-                <div>
-                    <label class="text-[10px] font-black text-slate-400 uppercase ml-1">Plate Number</label>
-                    <input type="text" id="vehPlateInput" placeholder="WP CAD-5050" class="w-full mt-1 px-5 py-4 bg-slate-50 border-0 rounded-2xl font-bold text-slate-700 focus:ring-2 focus:ring-blue-500">
-                </div>
-                <div>
-                    <label class="text-[10px] font-black text-slate-400 uppercase ml-1">Fixed Price (Rs.)</label>
-                    <input type="number" id="vehFixedPriceInput" placeholder="371" class="w-full mt-1 px-5 py-4 bg-slate-50 border-0 rounded-2xl font-bold text-slate-700 focus:ring-2 focus:ring-blue-500">
-                </div>
-            </div>
-            <div class="flex gap-3">
-                <button onclick="document.getElementById('vehicleModal').classList.add('hidden')" class="flex-1 py-4 text-slate-400 text-xs font-black uppercase">Cancel</button>
-                <button onclick="saveVehicle()" class="flex-1 py-4 bg-blue-600 text-white rounded-2xl text-xs font-black uppercase shadow-lg shadow-blue-100">Save Vehicle</button>
-            </div>
-        </div>
-    </div>
+// 3. Initialize
+window.onload = () => {
+    fetchLiveFuelData();
+    loadVehicles();
+    
+    // Refresh Button Event
+    document.getElementById('refreshBtn').addEventListener('click', (e) => {
+        e.preventDefault();
+        fetchLiveFuelData();
+    });
 
-    <script src="app.js"></script>
-</body>
-</html>
+    document.getElementById('addRangeBtn').addEventListener('click', addDateRangeRow);
+    document.getElementById('clearAllRangesBtn').addEventListener('click', clearAllRanges);
+};
