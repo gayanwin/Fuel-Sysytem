@@ -1,5 +1,5 @@
 /**
- * Fuel Price Adjustment System - Google Sheets Sync (Anti-Cache Version)
+ * Fuel Price Adjustment System - Multi-Fuel 6-Row History Sync
  */
 
 const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRFBYTixlf9JHq7oc523FFnWAB4NnGWkAu5Sy6ZNmdr_rHJHPZz7_mJf-XGgW8aT_yIj3Xv4wCnSTsQ/pub?output=csv';
@@ -7,7 +7,7 @@ const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRFBYTixl
 const db = new Dexie('FuelSystemDB');
 db.version(1).stores({ vehicles: '++id, plateNo, fixedPrice' });
 
-let livePrices = []; 
+let allFuelHistory = []; // ඔක්කොම දත්ත මෙතන තියෙනවා
 let currentPricesObj = { lp92: 0, lp95: 0, lad: 0, lsd: 0 };
 let selectedVehicle = null;
 let rangesCount = 0;
@@ -17,10 +17,8 @@ async function fetchLiveFuelData() {
     const lockScreen = document.getElementById('offlineLock');
 
     try {
-        // Cache Buster: ලින්ක් එක අගට අලුත් වෙලාව එකතු කරනවා බ්‍රවුසර් එක රවට්ටන්න
         const cacheBuster = new Date().getTime();
         const response = await fetch(`${SHEET_CSV_URL}&t=${cacheBuster}`);
-        
         const csvData = await response.text();
         const rows = csvData.split('\n').map(row => row.split(','));
         
@@ -39,11 +37,14 @@ async function fetchLiveFuelData() {
             if(document.getElementById('price_lsd')) document.getElementById('price_lsd').innerText = currentPricesObj.lsd;
         }
 
-        livePrices = rows.slice(1).map(row => ({
+        // CSV එකෙන් වර්ග 4ම දත්ත වෙන් කරගැනීම
+        allFuelHistory = rows.slice(1).map(row => ({
             date: row[0] ? row[0].trim() : "",
-            price: parseFloat(row[1]) || 0,
-            rawDate: row[0] ? new Date(row[0].trim()) : new Date(0)
-        })).filter(item => item.date !== "" && !isNaN(item.price));
+            lp92: parseFloat(row[1]) || 0,
+            lp95: parseFloat(row[2]) || 0,
+            lad: parseFloat(row[3]) || 0,
+            lsd: parseFloat(row[4]) || 0
+        })).filter(item => item.date !== "");
 
         updateLivePricesUI();
         
@@ -56,21 +57,42 @@ async function fetchLiveFuelData() {
     }
 }
 
+// මේකෙන් තමයි පෙළගස්වන්නේ
 function updateLivePricesUI() {
     const list = document.getElementById('priceHistoryList');
     if (!list) return;
-    list.innerHTML = livePrices.slice(0, 5).map(entry => `
-        <div class="flex items-center justify-between p-3 mb-2 rounded-xl border border-slate-100 bg-white">
-            <div class="flex flex-col text-left">
-                <span class="text-[9px] font-black text-slate-400 uppercase">${entry.date}</span>
-                <span class="text-xs font-bold text-slate-700 leading-tight">Lanka Petrol 92</span>
-            </div>
-            <div class="bg-blue-50 px-3 py-1 rounded-lg">
-                <span class="text-sm font-black text-blue-600 font-mono">Rs. ${entry.price}</span>
-            </div>
-        </div>`).join('');
+    
+    list.innerHTML = ''; // කලින් තිබ්බ ඒවා මකනවා
+
+    // වර්ග 4ට අදාළව ලේබල් සහ දත්ත (එක වර්ගයකට වෙනස්කම් 6 බැගින්)
+    const fuelTypes = [
+        { name: 'Lanka Petrol 92', key: 'lp92', color: 'blue' },
+        { name: 'Lanka Petrol 95', key: 'lp95', color: 'red' },
+        { name: 'Lanka Auto Diesel', key: 'lad', color: 'emerald' },
+        { name: 'Lanka Super Diesel', key: 'lsd', color: 'orange' }
+    ];
+
+    fuelTypes.forEach(fuel => {
+        // හෙඩින් එකක් දානවා (Petrol 92, 95 වගේ)
+        list.innerHTML += `<div class="text-[10px] font-black text-slate-400 uppercase mt-4 mb-2 ml-1 tracking-widest border-b border-slate-100 pb-1">${fuel.name} History</div>`;
+        
+        // අදාළ වර්ගයේ පේළි 6ක් පෙන්වීම
+        const historyRows = allFuelHistory.slice(0, 6).map(entry => `
+            <div class="flex items-center justify-between p-3 mb-2 rounded-xl border border-slate-50 bg-white shadow-sm">
+                <div class="flex flex-col text-left">
+                    <span class="text-[8px] font-black text-slate-400 uppercase">${entry.date}</span>
+                    <span class="text-[11px] font-bold text-slate-700">${fuel.name}</span>
+                </div>
+                <div class="bg-${fuel.color}-50 px-3 py-1 rounded-lg border border-${fuel.color}-100">
+                    <span class="text-sm font-black text-${fuel.color}-600 font-mono">Rs. ${entry[fuel.key]}</span>
+                </div>
+            </div>`).join('');
+        
+        list.innerHTML += historyRows;
+    });
 }
 
+// වාහන කළමනාකරණය
 async function loadVehicles() {
     const vehicles = await db.vehicles.toArray();
     const list = document.getElementById('vehicleList');
@@ -141,10 +163,11 @@ function calculateTotalAdjustment() {
         const dVal = document.getElementById(`start_date_${i}`)?.value;
         const lVal = parseFloat(document.getElementById(`liters_${i}`)?.value) || 0;
         if (dVal && lVal > 0) {
-            const entry = livePrices.find(p => p.date <= dVal) || livePrices[livePrices.length - 1];
-            const diff = entry.price - selectedVehicle.fixedPrice;
+            // ගණනය කිරීම්වලට LP92 මිල පාවිච්චි කරයි
+            const entry = allFuelHistory.find(p => p.date <= dVal) || allFuelHistory[allFuelHistory.length - 1];
+            const diff = entry.lp92 - selectedVehicle.fixedPrice;
             const sub = diff * lVal;
-            document.getElementById(`priceInfo_${i}`).innerText = `Market Price: Rs. ${entry.price}`;
+            document.getElementById(`priceInfo_${i}`).innerText = `Market Price (92): Rs. ${entry.lp92}`;
             document.getElementById(`subtotal_${i}`).innerText = sub.toLocaleString(undefined, {minimumFractionDigits: 2});
             grandTotal += sub;
         }
