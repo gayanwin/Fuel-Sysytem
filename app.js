@@ -1,6 +1,6 @@
 /**
- * Fuel Price Adjustment System - Pro Tabbed Version
- * 6 Rows per Fuel Type | Working Refresh | Clean UI
+ * Fuel Price Adjustment System - Gayan Special Edition
+ * Centered Tabs | Correct Naming | Working Refresh
  */
 
 const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRFBYTixlf9JHq7oc523FFnWAB4NnGWkAu5Sy6ZNmdr_rHJHPZz7_mJf-XGgW8aT_yIj3Xv4wCnSTsQ/pub?output=csv';
@@ -9,14 +9,15 @@ const db = new Dexie('FuelSystemDB');
 db.version(1).stores({ vehicles: '++id, plateNo, fixedPrice' });
 
 let allFuelHistory = [];
-let selectedFuelType = 'lp92'; // Default පෙන්වන්නේ 92
+let selectedFuelType = 'lp92'; 
 
+// 1. දත්ත අලුත් කිරීමේ ෆන්ක්ෂන් එක (Refresh)
 async function fetchLiveFuelData() {
     const statusEl = document.getElementById('systemStatus');
     const lockScreen = document.getElementById('offlineLock');
     const refreshBtn = document.getElementById('refreshBtn');
 
-    if(refreshBtn) refreshBtn.classList.add('animate-spin'); // කරකැවෙන animation එකක්
+    if(refreshBtn) refreshBtn.style.opacity = "0.5"; // Click කළාම පොඩ්ඩක් පේන්න
 
     try {
         const cacheBuster = new Date().getTime();
@@ -26,7 +27,7 @@ async function fetchLiveFuelData() {
         
         const latest = rows[1];
         if (latest) {
-            // උඩ තියෙන Widgets ටික Update කිරීම
+            // උඩ තියෙන Widgets Update කිරීම
             if(document.getElementById('price_lp92')) document.getElementById('price_lp92').innerText = latest[1];
             if(document.getElementById('price_lp95')) document.getElementById('price_lp95').innerText = latest[2];
             if(document.getElementById('price_lad')) document.getElementById('price_lad').innerText = latest[3];
@@ -43,57 +44,64 @@ async function fetchLiveFuelData() {
 
         updateLivePricesUI();
         
-        if (statusEl) statusEl.innerHTML = '<span class="text-green-500 font-black">● LIVE</span>';
+        if (statusEl) statusEl.innerHTML = '<span class="text-green-500 font-black">● LIVE SYNC</span>';
         if (lockScreen) lockScreen.classList.add('hidden');
 
     } catch (e) {
-        console.error("Sheet Error:", e);
-        if (statusEl) statusEl.innerHTML = '<span class="text-red-500 font-bold">ERROR</span>';
+        console.error("Fetch Error:", e);
+        if (statusEl) statusEl.innerHTML = '<span class="text-red-500 font-bold text-[10px]">SYNC ERROR</span>';
     } finally {
-        if(refreshBtn) refreshBtn.classList.remove('animate-spin');
+        if(refreshBtn) refreshBtn.style.opacity = "1";
     }
 }
 
-// වර්ගය තේරීමට Tab එකක් හැදීම
+// Global refresh function (HTML එකෙන් direct කෝල් කරන්න පුළුවන්)
+window.refreshData = function() {
+    fetchLiveFuelData();
+};
+
 function setFuelTab(type) {
     selectedFuelType = type;
     updateLivePricesUI();
 }
 
+// 2. UI එක සැකසීම (Tabs සහ List එක)
 function updateLivePricesUI() {
     const list = document.getElementById('priceHistoryList');
     if (!list) return;
 
     const fuelConfig = {
-        'lp92': { name: 'Petrol 92', color: 'blue' },
-        'lp95': { name: 'Petrol 95', color: 'red' },
-        'lad': { name: 'Auto Diesel', color: 'emerald' },
-        'lsd': { name: 'Super Diesel', color: 'orange' }
+        'lp92': { name: 'LP - 92', color: 'blue' },
+        'lp95': { name: 'LP - 95', color: 'red' },
+        'lad': { name: 'LAD', color: 'emerald' },
+        'lsd': { name: 'LSD', color: 'orange' }
     };
 
     const current = fuelConfig[selectedFuelType];
 
-    // Tab Buttons (මේවා UI එකේ උඩින්ම පේනවා)
+    // Tabs - මෙතන justify-center දාලා තියෙන්නේ මැදට වෙන්න
     let tabsHTML = `
-        <div class="flex gap-2 mb-4 overflow-x-auto pb-2 no-scrollbar">
+        <div class="flex justify-center gap-2 mb-5 flex-wrap">
             ${Object.keys(fuelConfig).map(key => `
                 <button onclick="setFuelTab('${key}')" 
-                    class="px-4 py-2 rounded-full text-[10px] font-black uppercase transition-all whitespace-nowrap
-                    ${selectedFuelType === key ? `bg-${fuelConfig[key].color}-600 text-white shadow-lg` : 'bg-slate-100 text-slate-400'}">
-                    ${fuelConfig[key].name.split(' ')[1] || fuelConfig[key].name}
+                    class="px-3 py-1.5 rounded-lg text-[10px] font-black transition-all border-2
+                    ${selectedFuelType === key 
+                        ? `bg-${fuelConfig[key].color}-600 border-${fuelConfig[key].color}-600 text-white shadow-md` 
+                        : 'bg-white border-slate-100 text-slate-400 hover:border-slate-200'}">
+                    ${fuelConfig[key].name}
                 </button>
             `).join('')}
         </div>
     `;
 
-    // අදාළ වර්ගයේ පේළි 6ක් පෙන්වීම
+    // ඉතිහාසය පේළි 6
     let rowsHTML = allFuelHistory.slice(0, 6).map(entry => `
-        <div class="flex items-center justify-between p-3 mb-2 rounded-xl border border-slate-50 bg-white shadow-sm animate-fade-in">
+        <div class="flex items-center justify-between p-3 mb-2 rounded-xl border border-slate-100 bg-white shadow-sm">
             <div class="flex flex-col text-left">
                 <span class="text-[8px] font-black text-slate-400 uppercase">${entry.date}</span>
-                <span class="text-[11px] font-bold text-slate-700">${current.name}</span>
+                <span class="text-[11px] font-extrabold text-slate-700">${current.name}</span>
             </div>
-            <div class="bg-${current.color}-50 px-3 py-1 rounded-lg border border-${current.color}-100">
+            <div class="bg-${current.color}-50 px-3 py-1 rounded-lg">
                 <span class="text-sm font-black text-${current.color}-600 font-mono">Rs. ${entry[selectedFuelType]}</span>
             </div>
         </div>
@@ -102,7 +110,8 @@ function updateLivePricesUI() {
     list.innerHTML = tabsHTML + rowsHTML;
 }
 
-// වාහන කළමනාකරණය සහ අනෙකුත් කොටස්
+// --- වාහන සහ ගණනය කිරීම් (UI එකට හානියක් නැත) ---
+
 async function loadVehicles() {
     const vehicles = await db.vehicles.toArray();
     const list = document.getElementById('vehicleList');
@@ -111,10 +120,10 @@ async function loadVehicles() {
     vehicles.forEach(v => {
         const isActive = (selectedVehicle?.id === v.id);
         list.innerHTML += `
-            <div onclick="selectVehicle(${v.id})" class="p-3 mb-2 rounded-xl border-2 transition-all cursor-pointer ${isActive ? 'border-blue-500 bg-blue-50' : 'border-slate-100 bg-white'}">
+            <div onclick="selectVehicle(${v.id})" class="p-3 mb-2 rounded-xl border-2 transition-all cursor-pointer ${isActive ? 'border-blue-500 bg-blue-50' : 'border-slate-100 bg-white shadow-sm'}">
                 <div class="flex justify-between items-center text-left">
-                    <span class="text-sm font-black text-slate-800 uppercase">${v.plateNo}</span>
-                    <span class="text-[10px] font-bold px-2 py-0.5 bg-slate-100 text-slate-600 rounded font-mono">Rs. ${v.fixedPrice}</span>
+                    <span class="text-sm font-black text-slate-800 uppercase tracking-tighter">${v.plateNo}</span>
+                    <span class="text-[10px] font-bold px-2 py-0.5 bg-slate-50 text-slate-500 rounded border border-slate-100">Rs. ${v.fixedPrice}</span>
                 </div>
             </div>`;
     });
@@ -190,23 +199,21 @@ function clearAllRanges() {
     document.getElementById('totalAdjustmentValue').innerText = '0.00'; 
 }
 
-// App එක පටන් ගැන්ම
+// ආරම්භය
 window.onload = () => {
     fetchLiveFuelData();
     loadVehicles();
     
-    // Refresh Button එක ලින්ක් කිරීම
     const refreshBtn = document.getElementById('refreshBtn');
     if(refreshBtn) {
-        refreshBtn.onclick = (e) => {
+        refreshBtn.addEventListener('click', (e) => {
             e.preventDefault();
             fetchLiveFuelData();
-        };
+        });
     }
 
     if(document.getElementById('addRangeBtn')) document.getElementById('addRangeBtn').addEventListener('click', addDateRangeRow);
     if(document.getElementById('clearAllRangesBtn')) document.getElementById('clearAllRangesBtn').addEventListener('click', clearAllRanges);
 };
 
-// Global function එකක් විදිහට Tab මාරු කරන්න ඉඩ දීම
 window.setFuelTab = setFuelTab;
