@@ -1,100 +1,196 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Fuel Price Adjustment System</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <script src="https://unpkg.com/dexie/dist/dexie.js"></script>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap');
-        body { font-family: 'Inter', sans-serif; }
-    </style>
-</head>
-<body class="bg-gray-100 p-4">
+/**
+ * Fuel Price System - Final Fix
+ * Corrects Tab Names and Dynamic Heading
+ */
 
-    <!-- Header Section -->
-    <div class="max-w-md mx-auto bg-white p-4 rounded-xl shadow-sm mb-4 flex justify-between items-center">
-        <div>
-            <h1 class="text-lg font-bold">FUEL SYSTEM</h1>
-            <p id="systemStatus" class="text-[10px] text-gray-400 font-bold uppercase">Syncing...</p>
-        </div>
-        <button id="refreshBtn" class="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center hover:bg-gray-200">
-            <i class="fa-solid fa-arrows-rotate text-gray-600"></i>
-        </button>
-    </div>
+const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRFBYTixlf9JHq7oc523FFnWAB4NnGWkAu5Sy6ZNmdr_rHJHPZz7_mJf-XGgW8aT_yIj3Xv4wCnSTsQ/pub?output=csv';
 
-    <!-- Live Prices Boxes -->
-    <div class="max-w-md mx-auto grid grid-cols-2 gap-2 mb-6">
-        <div class="bg-white p-4 rounded-xl border border-gray-200">
-            <p class="text-[10px] font-bold text-gray-400 uppercase">LP 92</p>
-            <p class="text-xl font-black">Rs. <span id="price_lp92">000</span></p>
-        </div>
-        <div class="bg-white p-4 rounded-xl border border-gray-200">
-            <p class="text-[10px] font-bold text-gray-400 uppercase">LP 95</p>
-            <p class="text-xl font-black">Rs. <span id="price_lp95">000</span></p>
-        </div>
-        <div class="bg-white p-4 rounded-xl border border-gray-200">
-            <p class="text-[10px] font-bold text-gray-400 uppercase">LAD</p>
-            <p class="text-xl font-black">Rs. <span id="price_lad">000</span></p>
-        </div>
-        <div class="bg-white p-4 rounded-xl border border-gray-200">
-            <p class="text-[10px] font-bold text-gray-400 uppercase">LSD</p>
-            <p class="text-xl font-black">Rs. <span id="price_lsd">000</span></p>
-        </div>
-    </div>
+const db = new Dexie('FuelSystemDB');
+db.version(1).stores({ vehicles: '++id, plateNo, fixedPrice' });
 
-    <!-- History Section with Tabs -->
-    <div class="max-w-md mx-auto mb-6">
-        <h3 id="fuelTitle" class="text-xs font-bold text-gray-500 uppercase mb-3 ml-1">Live 92 Octane Prices</h3>
+let allFuelHistory = [];
+let selectedFuelType = 'lp92'; 
+let selectedVehicle = null;
+let rangesCount = 0;
+
+// 1. Fetch Live Data
+async function fetchLiveFuelData() {
+    const statusEl = document.getElementById('systemStatus');
+    const refreshBtn = document.getElementById('refreshBtn');
+
+    if(refreshBtn) refreshBtn.querySelector('i').classList.add('fa-spin');
+
+    try {
+        const cacheBuster = new Date().getTime();
+        const response = await fetch(`${SHEET_CSV_URL}&t=${cacheBuster}`);
+        const csvData = await response.text();
+        const rows = csvData.split('\n').map(row => row.split(','));
         
-        <!-- මෙතන තමයි Tabs (Buttons) ටික තියෙන්නේ -->
-        <div id="fuelTabs" class="flex justify-center gap-2 mb-4">
-            <!-- JS වලින් Tabs ටික මෙතනට වැටෙනවා -->
-        </div>
+        const latest = rows[1];
+        if (latest) {
+            if(document.getElementById('price_lp92')) document.getElementById('price_lp92').innerText = latest[1];
+            if(document.getElementById('price_lp95')) document.getElementById('price_lp95').innerText = latest[2];
+            if(document.getElementById('price_lad')) document.getElementById('price_lad').innerText = latest[3];
+            if(document.getElementById('price_lsd')) document.getElementById('price_lsd').innerText = latest[4];
+        }
 
-        <div id="priceHistoryList" class="space-y-2">
-            <!-- පේළි 6 මෙතනට වැටෙනවා -->
-        </div>
-    </div>
+        allFuelHistory = rows.slice(1).map(row => ({
+            date: row[0] ? row[0].trim() : "",
+            lp92: parseFloat(row[1]) || 0,
+            lp95: parseFloat(row[2]) || 0,
+            lad: parseFloat(row[3]) || 0,
+            lsd: parseFloat(row[4]) || 0
+        })).filter(item => item.date !== "");
 
-    <!-- Vehicle Section -->
-    <div class="max-w-md mx-auto bg-white p-4 rounded-xl shadow-sm mb-4">
-        <div class="flex justify-between items-center mb-4">
-            <h3 class="text-sm font-bold uppercase">My Vehicles</h3>
-            <button onclick="document.getElementById('vehicleModal').classList.remove('hidden')" class="bg-blue-600 text-white text-[10px] px-3 py-1 rounded-md font-bold">ADD</button>
-        </div>
-        <div id="vehicleList"></div>
-    </div>
+        updateLivePricesUI();
+        if (statusEl) statusEl.innerHTML = '<span class="text-green-500 font-black">● LIVE SYNC ACTIVE</span>';
 
-    <!-- Calculator Section -->
-    <div id="calculatorPanel" class="max-w-md mx-auto hidden">
-        <div class="bg-blue-600 p-6 rounded-2xl text-white mb-4">
-            <p class="text-[10px] font-bold opacity-70 uppercase">Total Adjustment</p>
-            <p class="text-3xl font-black">Rs. <span id="totalAdjustmentValue">0.00</span></p>
-            <p id="activeVehicleLabel" class="text-[10px] mt-2 font-bold bg-white/20 inline-block px-2 py-1 rounded text-white uppercase"></p>
-        </div>
-        <div id="dateRangesContainer"></div>
-        <button id="addRangeBtn" class="w-full py-3 border-2 border-dashed border-gray-300 rounded-xl text-gray-400 text-xs font-bold uppercase mb-2">+ Add Fueling Date</button>
-        <button id="clearAllRangesBtn" class="w-full text-gray-400 text-[10px] font-bold uppercase py-2">Clear All</button>
-    </div>
+    } catch (e) {
+        console.error("Fetch Error:", e);
+        if (statusEl) statusEl.innerHTML = '<span class="text-red-500 font-black">OFFLINE</span>';
+    } finally {
+        if(refreshBtn) refreshBtn.querySelector('i').classList.remove('fa-spin');
+    }
+}
 
-    <!-- Modal -->
-    <div id="vehicleModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-        <div class="bg-white p-6 rounded-2xl w-full max-w-sm">
-            <h4 class="font-bold mb-4">New Vehicle</h4>
-            <input type="text" id="vehPlateInput" placeholder="Plate Number (e.g. CAD-5050)" class="w-full p-3 bg-gray-50 rounded-lg mb-3 text-sm">
-            <input type="number" id="vehFixedPriceInput" placeholder="Fixed Price (Rs.)" class="w-full p-3 bg-gray-50 rounded-lg mb-4 text-sm">
-            <div class="flex gap-2">
-                <button onclick="document.getElementById('vehicleModal').classList.add('hidden')" class="flex-1 py-2 text-gray-500 font-bold">Cancel</button>
-                <button onclick="saveVehicle()" class="flex-1 py-2 bg-blue-600 text-white rounded-lg font-bold">Save</button>
+// 2. Update History UI & Handle Name Changes
+window.setFuelTab = function(type) {
+    selectedFuelType = type;
+    updateLivePricesUI();
+};
+
+function updateLivePricesUI() {
+    const list = document.getElementById('priceHistoryList');
+    const tabsContainer = document.getElementById('fuelTabs');
+    const titleEl = document.getElementById('fuelTitle');
+
+    if (!list || !tabsContainer) return;
+
+    const fuelConfig = {
+        'lp92': { name: 'LP-92', title: '92 Octane', color: 'blue' },
+        'lp95': { name: 'LP-95', title: '95 Octane', color: 'red' },
+        'lad': { name: 'LAD', title: 'Auto Diesel', color: 'green' },
+        'lsd': { name: 'LSD', title: 'Super Diesel', color: 'orange' }
+    };
+
+    const current = fuelConfig[selectedFuelType];
+
+    // මෙන්න මෙතනින් තමයි උඹ කියපු නම වෙනස් වෙන්නේ
+    if (titleEl) titleEl.innerText = `Live ${current.title} Prices`;
+
+    // Tabs
+    tabsContainer.innerHTML = Object.keys(fuelConfig).map(key => `
+        <button onclick="setFuelTab('${key}')" 
+            class="px-3 py-1.5 text-[10px] font-black rounded-lg transition-all border
+            ${selectedFuelType === key 
+                ? 'bg-gray-800 border-gray-800 text-white' 
+                : 'bg-white border-gray-200 text-gray-400'}">
+            ${fuelConfig[key].name}
+        </button>
+    `).join('');
+
+    // History List (Show 6 rows)
+    list.innerHTML = allFuelHistory.slice(0, 6).map(entry => `
+        <div class="flex items-center justify-between p-3 bg-white border border-gray-100 rounded-xl shadow-sm">
+            <div class="flex flex-col">
+                <span class="text-[8px] font-black text-gray-400 uppercase tracking-tighter">${entry.date}</span>
+                <span class="text-[11px] font-black text-gray-700">${current.name}</span>
             </div>
+            <div class="font-mono font-black text-sm text-gray-900">Rs. ${entry[selectedFuelType]}</div>
         </div>
-    </div>
+    `).join('');
+}
 
-    <script src="app.js"></script>
-</body>
-</html>
+// 3. Vehicles
+async function loadVehicles() {
+    const vehicles = await db.vehicles.toArray();
+    const list = document.getElementById('vehicleList');
+    if (!list) return;
+    list.innerHTML = vehicles.length ? '' : '<p class="text-[10px] text-center text-gray-400 py-4 italic">No vehicles added.</p>';
+    vehicles.forEach(v => {
+        const isActive = (selectedVehicle?.id === v.id);
+        list.innerHTML += `
+            <div onclick="selectVehicle(${v.id})" class="p-3 rounded-xl border-2 transition-all cursor-pointer ${isActive ? 'border-blue-500 bg-blue-50' : 'border-gray-50 bg-gray-50'}">
+                <div class="flex justify-between items-center">
+                    <span class="text-xs font-black text-gray-800 uppercase">${v.plateNo}</span>
+                    <span class="text-[10px] font-bold text-gray-500">Fixed: Rs. ${v.fixedPrice}</span>
+                </div>
+            </div>`;
+    });
+}
+
+async function selectVehicle(id) {
+    selectedVehicle = await db.vehicles.get(id);
+    document.getElementById('activeVehicleLabel').innerText = selectedVehicle.plateNo;
+    document.getElementById('calculatorPanel').classList.remove('hidden');
+    loadVehicles(); clearAllRanges(); addDateRangeRow();
+}
+
+window.saveVehicle = async function() {
+    const plate = document.getElementById('vehPlateInput').value.trim();
+    const price = parseFloat(document.getElementById('vehFixedPriceInput').value);
+    if (plate && !isNaN(price)) {
+        await db.vehicles.add({ plateNo: plate.toUpperCase(), fixedPrice: price });
+        document.getElementById('vehicleModal').classList.add('hidden');
+        loadVehicles();
+        document.getElementById('vehPlateInput').value = '';
+        document.getElementById('vehFixedPriceInput').value = '';
+    }
+};
+
+// 4. Calculator
+function addDateRangeRow() {
+    rangesCount++;
+    const container = document.getElementById('dateRangesContainer');
+    const rowHTML = `
+        <div class="bg-gray-50 p-4 rounded-xl border border-gray-100 mb-2">
+            <div class="grid grid-cols-2 gap-2 mb-2">
+                <input type="text" id="start_date_${rangesCount}" class="bg-white p-2 rounded-lg text-xs font-bold border-0 shadow-sm" placeholder="Pick Date">
+                <input type="number" id="liters_${rangesCount}" step="0.01" class="bg-white p-2 rounded-lg text-xs font-bold text-right border-0 shadow-sm" placeholder="Liters" oninput="calculateTotalAdjustment()">
+            </div>
+            <div class="flex justify-between items-center text-[9px] font-black text-gray-400">
+                <span id="priceInfo_${rangesCount}">---</span>
+                <span class="uppercase">Subtotal: Rs. <span id="subtotal_${rangesCount}" class="text-blue-600 font-mono">0.00</span></span>
+            </div>
+        </div>`;
+    container.insertAdjacentHTML('beforeend', rowHTML);
+    flatpickr(`#start_date_${rangesCount}`, { dateFormat: "Y-m-d", maxDate: "today", onChange: calculateTotalAdjustment });
+}
+
+function calculateTotalAdjustment() {
+    if (!selectedVehicle) return;
+    let grandTotal = 0;
+    for (let i = 1; i <= rangesCount; i++) {
+        const dVal = document.getElementById(`start_date_${i}`)?.value;
+        const lVal = parseFloat(document.getElementById(`liters_${i}`)?.value) || 0;
+        if (dVal && lVal > 0) {
+            const entry = allFuelHistory.find(p => p.date <= dVal) || allFuelHistory[allFuelHistory.length - 1];
+            const diff = entry.lp92 - selectedVehicle.fixedPrice;
+            const sub = diff * lVal;
+            document.getElementById(`priceInfo_${i}`).innerText = `Market Price (92): Rs. ${entry.lp92}`;
+            document.getElementById(`subtotal_${i}`).innerText = sub.toFixed(2);
+            grandTotal += sub;
+        }
+    }
+    document.getElementById('totalAdjustmentValue').innerText = grandTotal.toLocaleString(undefined, {minimumFractionDigits: 2});
+}
+
+function clearAllRanges() { 
+    document.getElementById('dateRangesContainer').innerHTML = ''; 
+    rangesCount = 0; 
+    document.getElementById('totalAdjustmentValue').innerText = '0.00'; 
+}
+
+// Init
+window.onload = () => {
+    fetchLiveFuelData();
+    loadVehicles();
+    
+    document.getElementById('refreshBtn').onclick = (e) => {
+        e.preventDefault();
+        fetchLiveFuelData();
+    };
+
+    document.getElementById('addRangeBtn').addEventListener('click', addDateRangeRow);
+    document.getElementById('clearAllRangesBtn').addEventListener('click', clearAllRanges);
+};
