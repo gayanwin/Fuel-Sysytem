@@ -1,6 +1,6 @@
 /**
- * Fuel Price Adjustment System - Gayan Special Edition
- * Centered Tabs | Correct Naming | Working Refresh
+ * Fuel Price Adjustment System - Pro Edition
+ * Dynamic Headings | Centered Tabs | Working Refresh
  */
 
 const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRFBYTixlf9JHq7oc523FFnWAB4NnGWkAu5Sy6ZNmdr_rHJHPZz7_mJf-XGgW8aT_yIj3Xv4wCnSTsQ/pub?output=csv';
@@ -11,13 +11,12 @@ db.version(1).stores({ vehicles: '++id, plateNo, fixedPrice' });
 let allFuelHistory = [];
 let selectedFuelType = 'lp92'; 
 
-// 1. දත්ත අලුත් කිරීමේ ෆන්ක්ෂන් එක (Refresh)
+// 1. Refresh Function - රිෆ්‍රෙෂ් වැඩ කරන්න මේක අනිවාර්යයි
 async function fetchLiveFuelData() {
     const statusEl = document.getElementById('systemStatus');
-    const lockScreen = document.getElementById('offlineLock');
     const refreshBtn = document.getElementById('refreshBtn');
 
-    if(refreshBtn) refreshBtn.style.opacity = "0.5"; // Click කළාම පොඩ්ඩක් පේන්න
+    if(refreshBtn) refreshBtn.style.opacity = "0.5"; 
 
     try {
         const cacheBuster = new Date().getTime();
@@ -27,7 +26,6 @@ async function fetchLiveFuelData() {
         
         const latest = rows[1];
         if (latest) {
-            // උඩ තියෙන Widgets Update කිරීම
             if(document.getElementById('price_lp92')) document.getElementById('price_lp92').innerText = latest[1];
             if(document.getElementById('price_lp95')) document.getElementById('price_lp95').innerText = latest[2];
             if(document.getElementById('price_lad')) document.getElementById('price_lad').innerText = latest[3];
@@ -44,18 +42,17 @@ async function fetchLiveFuelData() {
 
         updateLivePricesUI();
         
-        if (statusEl) statusEl.innerHTML = '<span class="text-green-500 font-black">● LIVE SYNC</span>';
-        if (lockScreen) lockScreen.classList.add('hidden');
+        if (statusEl) statusEl.innerHTML = '<span class="text-green-500 font-black">● LIVE</span>';
 
     } catch (e) {
         console.error("Fetch Error:", e);
-        if (statusEl) statusEl.innerHTML = '<span class="text-red-500 font-bold text-[10px]">SYNC ERROR</span>';
+        if (statusEl) statusEl.innerHTML = '<span class="text-red-500 font-bold">ERROR</span>';
     } finally {
         if(refreshBtn) refreshBtn.style.opacity = "1";
     }
 }
 
-// Global refresh function (HTML එකෙන් direct කෝල් කරන්න පුළුවන්)
+// Global refresh function
 window.refreshData = function() {
     fetchLiveFuelData();
 };
@@ -65,36 +62,42 @@ function setFuelTab(type) {
     updateLivePricesUI();
 }
 
-// 2. UI එක සැකසීම (Tabs සහ List එක)
+// 2. UI එක සැකසීම (Dynamic Heading ඇතුළුව)
 function updateLivePricesUI() {
     const list = document.getElementById('priceHistoryList');
+    const titleEl = document.getElementById('fuelTitle'); // HTML එකේ id="fuelTitle" තිබිය යුතුයි
     if (!list) return;
 
     const fuelConfig = {
-        'lp92': { name: 'LP - 92', color: 'blue' },
-        'lp95': { name: 'LP - 95', color: 'red' },
-        'lad': { name: 'LAD', color: 'emerald' },
-        'lsd': { name: 'LSD', color: 'orange' }
+        'lp92': { name: 'LP - 92', fullName: '92 Octane', color: 'blue' },
+        'lp95': { name: 'LP - 95', fullName: '95 Octane', color: 'red' },
+        'lad': { name: 'LAD', fullName: 'Auto Diesel', color: 'emerald' },
+        'lsd': { name: 'LSD', fullName: 'Super Diesel', color: 'orange' }
     };
 
     const current = fuelConfig[selectedFuelType];
 
-    // Tabs - මෙතන justify-center දාලා තියෙන්නේ මැදට වෙන්න
+    // ටැබ් එක මාරු වෙද්දී උඩ තියෙන ලේබල් එක වෙනස් කිරීම
+    if (titleEl) {
+        titleEl.innerText = `Live ${current.fullName} Prices`;
+    }
+
+    // Tabs - Center කරලා තියෙන්නේ
     let tabsHTML = `
-        <div class="flex justify-center gap-2 mb-5 flex-wrap">
+        <div class="flex justify-center gap-2 mb-6 flex-wrap">
             ${Object.keys(fuelConfig).map(key => `
                 <button onclick="setFuelTab('${key}')" 
-                    class="px-3 py-1.5 rounded-lg text-[10px] font-black transition-all border-2
+                    class="px-4 py-2 rounded-xl text-[10px] font-black transition-all border-2
                     ${selectedFuelType === key 
-                        ? `bg-${fuelConfig[key].color}-600 border-${fuelConfig[key].color}-600 text-white shadow-md` 
-                        : 'bg-white border-slate-100 text-slate-400 hover:border-slate-200'}">
+                        ? `bg-${fuelConfig[key].color}-600 border-${fuelConfig[key].color}-600 text-white shadow-lg` 
+                        : 'bg-white border-slate-100 text-slate-400' }">
                     ${fuelConfig[key].name}
                 </button>
             `).join('')}
         </div>
     `;
 
-    // ඉතිහාසය පේළි 6
+    // History List
     let rowsHTML = allFuelHistory.slice(0, 6).map(entry => `
         <div class="flex items-center justify-between p-3 mb-2 rounded-xl border border-slate-100 bg-white shadow-sm">
             <div class="flex flex-col text-left">
@@ -110,8 +113,7 @@ function updateLivePricesUI() {
     list.innerHTML = tabsHTML + rowsHTML;
 }
 
-// --- වාහන සහ ගණනය කිරීම් (UI එකට හානියක් නැත) ---
-
+// --- වාහන සහ ගණනය කිරීම් ---
 async function loadVehicles() {
     const vehicles = await db.vehicles.toArray();
     const list = document.getElementById('vehicleList');
@@ -122,8 +124,8 @@ async function loadVehicles() {
         list.innerHTML += `
             <div onclick="selectVehicle(${v.id})" class="p-3 mb-2 rounded-xl border-2 transition-all cursor-pointer ${isActive ? 'border-blue-500 bg-blue-50' : 'border-slate-100 bg-white shadow-sm'}">
                 <div class="flex justify-between items-center text-left">
-                    <span class="text-sm font-black text-slate-800 uppercase tracking-tighter">${v.plateNo}</span>
-                    <span class="text-[10px] font-bold px-2 py-0.5 bg-slate-50 text-slate-500 rounded border border-slate-100">Rs. ${v.fixedPrice}</span>
+                    <span class="text-sm font-black text-slate-800 uppercase">${v.plateNo}</span>
+                    <span class="text-[10px] font-bold px-2 py-0.5 bg-slate-50 text-slate-500 rounded border border-slate-100 font-mono">Rs. ${v.fixedPrice}</span>
                 </div>
             </div>`;
     });
@@ -185,7 +187,7 @@ function calculateTotalAdjustment() {
             const entry = allFuelHistory.find(p => p.date <= dVal) || allFuelHistory[allFuelHistory.length - 1];
             const diff = entry.lp92 - selectedVehicle.fixedPrice;
             const sub = diff * lVal;
-            document.getElementById(`priceInfo_${i}`).innerText = `Market Price (92): Rs. ${entry.lp92}`;
+            document.getElementById(`priceInfo_${i}`).innerText = `Price (92): Rs. ${entry.lp92}`;
             document.getElementById(`subtotal_${i}`).innerText = sub.toLocaleString(undefined, {minimumFractionDigits: 2});
             grandTotal += sub;
         }
@@ -199,17 +201,18 @@ function clearAllRanges() {
     document.getElementById('totalAdjustmentValue').innerText = '0.00'; 
 }
 
-// ආරම්භය
+// 3. Initialize
 window.onload = () => {
     fetchLiveFuelData();
     loadVehicles();
     
+    // Refresh Button එකට ID එකෙන් ලින්ක් කිරීම
     const refreshBtn = document.getElementById('refreshBtn');
     if(refreshBtn) {
-        refreshBtn.addEventListener('click', (e) => {
+        refreshBtn.onclick = function(e) {
             e.preventDefault();
             fetchLiveFuelData();
-        });
+        };
     }
 
     if(document.getElementById('addRangeBtn')) document.getElementById('addRangeBtn').addEventListener('click', addDateRangeRow);
