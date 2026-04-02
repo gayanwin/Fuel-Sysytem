@@ -1,5 +1,5 @@
 /**
- * Fuel Price Adjustment System - Final Stable Version
+ * Fuel Price Adjustment System - Final Stable Version (Cache & Date Fixed)
  * For: Gayan Chinthaka (NWSDB)
  */
 
@@ -16,20 +16,24 @@ let currentPricesObj = { lp92: 0, lp95: 0, lad: 0, lsd: 0 };
 let selectedVehicle = null;
 let rangesCount = 0;
 
-// 2. Fetch Live Data from GitHub Source
+// 2. Fetch Live Data from GitHub Source (Cache-Busting Added)
 async function fetchLiveFuelData() {
-    console.log("Fetching data...");
+    console.log("Fetching fresh data from server...");
     const statusEl = document.getElementById('systemStatus');
     const lockScreen = document.getElementById('offlineLock');
     
     try {
         const baseUrl = 'https://raw.githubusercontent.com/xzunk/fuelpricelk/main/data';
         
+        // Cache-buster: හැම request එකකටම අලුත් timestamp එකක් යවන නිසා පරණ දත්ත load වෙන්නේ නෑ.
+        const timeStamp = new Date().getTime(); 
+        const fetchOptions = { cache: 'no-store' }; 
+        
         const [res92, res95, resLAD, resLSD] = await Promise.all([
-            fetch(`${baseUrl}/petrol92.json`),
-            fetch(`${baseUrl}/petrol95.json`),
-            fetch(`${baseUrl}/autodiesel.json`),
-            fetch(`${baseUrl}/superdiesel.json`)
+            fetch(`${baseUrl}/petrol92.json?t=${timeStamp}`, fetchOptions),
+            fetch(`${baseUrl}/petrol95.json?t=${timeStamp}`, fetchOptions),
+            fetch(`${baseUrl}/autodiesel.json?t=${timeStamp}`, fetchOptions),
+            fetch(`${baseUrl}/superdiesel.json?t=${timeStamp}`, fetchOptions)
         ]);
 
         const data92 = await res92.json();
@@ -37,12 +41,16 @@ async function fetchLiveFuelData() {
         const dataLAD = await resLAD.json();
         const dataLSD = await resLSD.json();
 
-        // Map and Sort History
-        livePrices = data92.history.map(h => ({
-            date: h.date,
-            price: parseFloat(h.price),
-            rawDate: new Date(h.date)
-        })).sort((a, b) => b.rawDate - a.rawDate);
+        // Map and Sort History - Date Objects වලින්ම හදලා තියෙන්නේ
+        livePrices = data92.history.map(h => {
+            let d = new Date(h.date);
+            d.setHours(0, 0, 0, 0); // වෙලාව 00:00:00 කරලා දවස විතරක් ගන්නවා
+            return {
+                date: h.date,
+                price: parseFloat(h.price),
+                rawDate: d
+            };
+        }).sort((a, b) => b.rawDate - a.rawDate);
 
         // Helper to get latest price
         const getLatest = (historyArr) => {
@@ -138,7 +146,6 @@ async function selectVehicle(id) {
     addDateRangeRow();
 }
 
-// Modal Control Functions (HTML onclick calls these)
 window.openVehicleModal = function() {
     const modal = document.getElementById('vehicleModal');
     modal.classList.remove('hidden');
@@ -193,7 +200,6 @@ function addDateRangeRow() {
     
     container.insertAdjacentHTML('beforeend', rowHTML);
 
-    // Initialize Flatpickr for the new row
     flatpickr(`#start_date_${rangesCount}`, {
         dateFormat: "Y-m-d",
         onChange: () => calculateTotalAdjustment()
@@ -214,8 +220,13 @@ function calculateTotalAdjustment() {
             const liters = parseFloat(lInput.value) || 0;
             
             if (dateVal && liters > 0) {
-                // Find nearest price on or before the selected date
-                const priceEntry = livePrices.find(p => p.date <= dateVal) || livePrices[livePrices.length - 1];
+                // හරියටම තෝරපු දවස Date object එකකට හරවනවා
+                const selectedDateObj = new Date(dateVal);
+                selectedDateObj.setHours(0, 0, 0, 0);
+
+                // තෝරපු දවසට සමාන හෝ ඊට කලින් අන්තිමට වෙනස් වුණ මිල හොයනවා
+                const priceEntry = livePrices.find(p => p.rawDate <= selectedDateObj) || livePrices[livePrices.length - 1];
+                
                 const subtotal = (priceEntry.price - selectedVehicle.fixedPrice) * liters;
                 subEl.innerText = subtotal.toFixed(2);
                 grandTotal += subtotal;
@@ -238,7 +249,6 @@ window.onload = async () => {
     fetchLiveFuelData();
     loadVehicles();
     
-    // Bind Buttons to Functions
     document.getElementById('addRangeBtn').addEventListener('click', addDateRangeRow);
     document.getElementById('clearAllRangesBtn').addEventListener('click', clearAllRanges);
     document.getElementById('refreshPricesBtn').addEventListener('click', fetchLiveFuelData);
