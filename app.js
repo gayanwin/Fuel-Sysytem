@@ -11,22 +11,20 @@ let rangesCount = 0;
 async function fetchLiveFuelData() {
     const statusEl = document.getElementById('systemStatus');
     const refreshBtn = document.getElementById('refreshBtn');
-    if(refreshBtn) {
-        const icon = refreshBtn.querySelector('i');
-        if(icon) icon.classList.add('fa-spin');
-    }
 
     try {
-        const response = await fetch(`${SHEET_CSV_URL}&t=${new Date().getTime()}`);
+        // Cache එක අල්ලන්නේ නැති වෙන්න Query String එකක් දානවා ( ?t=timestamp )
+        const response = await fetch(`${SHEET_CSV_URL}&cachebuster=${new Date().getTime()}`);
         const csvData = await response.text();
         
-        // Data parsing
+        // Data Parsing - හිස් පේළි අයින් කරනවා
         const rows = csvData.split('\n')
             .map(row => row.split(',').map(cell => cell.replace(/"/g, '').trim()))
-            .filter(row => row[0] && row[0] !== "Date");
+            .filter(row => row.length > 1 && row[0] !== "Date");
         
-        // ශීට් එකේ යටම තියෙන අලුත්ම පේළිය ගැනීම
+        // අලුත්ම දත්ත පේළිය (යටම එක)
         const latest = rows[rows.length - 1]; 
+        
         if (latest) {
             if(document.getElementById('price_lp92')) document.getElementById('price_lp92').innerText = latest[1];
             if(document.getElementById('price_lp95')) document.getElementById('price_lp95').innerText = latest[2];
@@ -34,6 +32,7 @@ async function fetchLiveFuelData() {
             if(document.getElementById('price_lsd')) document.getElementById('price_lsd').innerText = latest[4];
         }
 
+        // History එක reverse කරලා ගන්නවා (අලුත්ම එක උඩට)
         allFuelHistory = rows.map(row => ({
             date: row[0],
             lp92: parseFloat(row[1]) || 0,
@@ -47,14 +46,10 @@ async function fetchLiveFuelData() {
     } catch (e) {
         console.error("Fetch Error:", e);
         if (statusEl) statusEl.innerHTML = '<span class="text-red-500 font-bold">OFFLINE</span>';
-    } finally {
-        if(refreshBtn) {
-            const icon = refreshBtn.querySelector('i');
-            if(icon) icon.classList.remove('fa-spin');
-        }
     }
 }
 
+// UI එකේ ටැබ් එක මාරු කරන කොට නම මාරු වෙන්න
 window.setFuelTab = function(type) {
     selectedFuelType = type;
     updateLivePricesUI();
@@ -75,6 +70,7 @@ function updateLivePricesUI() {
     const current = fuelConfig[selectedFuelType];
     if (titleEl) titleEl.innerText = `Live ${current.title} Prices`;
 
+    // Tabs ටික හදනවා
     let tabsHTML = `<div class="flex justify-center gap-2 mb-4">
         ${Object.keys(fuelConfig).map(key => `
             <button onclick="setFuelTab('${key}')" 
@@ -85,6 +81,7 @@ function updateLivePricesUI() {
         `).join('')}
     </div>`;
 
+    // ඉතිහාසය පේළි 6
     let rowsHTML = allFuelHistory.slice(0, 6).map(entry => `
         <div class="flex items-center justify-between p-3 bg-white border border-slate-100 rounded-2xl mb-2 shadow-sm">
             <div class="flex flex-col">
@@ -100,7 +97,7 @@ function updateLivePricesUI() {
     list.innerHTML = tabsHTML + rowsHTML;
 }
 
-// Global functions for buttons
+// වාහන සේව් කිරීම සහ ලෝඩ් කිරීම (Original Logic)
 window.saveVehicle = async function() {
     const plate = document.getElementById('vehPlateInput')?.value.trim();
     const price = parseFloat(document.getElementById('vehFixedPriceInput')?.value);
@@ -180,4 +177,8 @@ window.clearAllRanges = function() {
 window.addEventListener('DOMContentLoaded', () => {
     fetchLiveFuelData();
     loadVehicles();
+    
+    // Refresh Button Event
+    const refreshBtn = document.getElementById('refreshBtn');
+    if(refreshBtn) refreshBtn.onclick = (e) => { e.preventDefault(); fetchLiveFuelData(); };
 });
