@@ -1,8 +1,3 @@
-/**
- * Fuel Price System - Final Fix
- * Corrects Tab Names and Dynamic Heading
- */
-
 const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRFBYTixlf9JHq7oc523FFnWAB4NnGWkAu5Sy6ZNmdr_rHJHPZz7_mJf-XGgW8aT_yIj3Xv4wCnSTsQ/pub?output=csv';
 
 const db = new Dexie('FuelSystemDB');
@@ -13,7 +8,7 @@ let selectedFuelType = 'lp92';
 let selectedVehicle = null;
 let rangesCount = 0;
 
-// 1. Fetch Live Data
+// Data Fetching
 async function fetchLiveFuelData() {
     const statusEl = document.getElementById('systemStatus');
     const refreshBtn = document.getElementById('refreshBtn');
@@ -28,10 +23,10 @@ async function fetchLiveFuelData() {
         
         const latest = rows[1];
         if (latest) {
-            if(document.getElementById('price_lp92')) document.getElementById('price_lp92').innerText = latest[1];
-            if(document.getElementById('price_lp95')) document.getElementById('price_lp95').innerText = latest[2];
-            if(document.getElementById('price_lad')) document.getElementById('price_lad').innerText = latest[3];
-            if(document.getElementById('price_lsd')) document.getElementById('price_lsd').innerText = latest[4];
+            document.getElementById('price_lp92').innerText = latest[1];
+            document.getElementById('price_lp95').innerText = latest[2];
+            document.getElementById('price_lad').innerText = latest[3];
+            document.getElementById('price_lsd').innerText = latest[4];
         }
 
         allFuelHistory = rows.slice(1).map(row => ({
@@ -47,73 +42,80 @@ async function fetchLiveFuelData() {
 
     } catch (e) {
         console.error("Fetch Error:", e);
-        if (statusEl) statusEl.innerHTML = '<span class="text-red-500 font-black">OFFLINE</span>';
+        if (statusEl) statusEl.innerHTML = '<span class="text-red-500 font-bold">SYNC ERROR</span>';
     } finally {
         if(refreshBtn) refreshBtn.querySelector('i').classList.remove('fa-spin');
     }
 }
 
-// 2. Update History UI & Handle Name Changes
+// Tab Change
 window.setFuelTab = function(type) {
     selectedFuelType = type;
     updateLivePricesUI();
 };
 
+// UI Update with Dynamic Title
 function updateLivePricesUI() {
     const list = document.getElementById('priceHistoryList');
-    const tabsContainer = document.getElementById('fuelTabs');
     const titleEl = document.getElementById('fuelTitle');
-
-    if (!list || !tabsContainer) return;
+    if (!list) return;
 
     const fuelConfig = {
-        'lp92': { name: 'LP-92', title: '92 Octane', color: 'blue' },
-        'lp95': { name: 'LP-95', title: '95 Octane', color: 'red' },
-        'lad': { name: 'LAD', title: 'Auto Diesel', color: 'green' },
-        'lsd': { name: 'LSD', title: 'Super Diesel', color: 'orange' }
+        'lp92': { name: 'LP 92', title: '92 Octane' },
+        'lp95': { name: 'LP 95', title: '95 Octane' },
+        'lad': { name: 'LAD', title: 'Auto Diesel' },
+        'lsd': { name: 'LSD', title: 'Super Diesel' }
     };
 
     const current = fuelConfig[selectedFuelType];
 
-    // මෙන්න මෙතනින් තමයි උඹ කියපු නම වෙනස් වෙන්නේ
+    // මෙන්න මෙතනින් තමයි නම වෙනස් වෙන්නේ
     if (titleEl) titleEl.innerText = `Live ${current.title} Prices`;
 
-    // Tabs
-    tabsContainer.innerHTML = Object.keys(fuelConfig).map(key => `
-        <button onclick="setFuelTab('${key}')" 
-            class="px-3 py-1.5 text-[10px] font-black rounded-lg transition-all border
-            ${selectedFuelType === key 
-                ? 'bg-gray-800 border-gray-800 text-white' 
-                : 'bg-white border-gray-200 text-gray-400'}">
-            ${fuelConfig[key].name}
-        </button>
-    `).join('');
+    // Render Tabs
+    let tabsHTML = `
+        <div class="flex justify-center gap-2 mb-4">
+            ${Object.keys(fuelConfig).map(key => `
+                <button onclick="setFuelTab('${key}')" 
+                    class="px-3 py-1.5 rounded-lg text-[10px] font-black transition-all border
+                    ${selectedFuelType === key 
+                        ? 'bg-slate-800 border-slate-800 text-white' 
+                        : 'bg-white border-slate-200 text-slate-400' }">
+                    ${fuelConfig[key].name}
+                </button>
+            `).join('')}
+        </div>
+    `;
 
-    // History List (Show 6 rows)
-    list.innerHTML = allFuelHistory.slice(0, 6).map(entry => `
-        <div class="flex items-center justify-between p-3 bg-white border border-gray-100 rounded-xl shadow-sm">
+    // Render History Rows
+    let rowsHTML = allFuelHistory.slice(0, 6).map(entry => `
+        <div class="flex items-center justify-between p-3 bg-white border border-slate-100 rounded-2xl shadow-sm">
             <div class="flex flex-col">
-                <span class="text-[8px] font-black text-gray-400 uppercase tracking-tighter">${entry.date}</span>
-                <span class="text-[11px] font-black text-gray-700">${current.name}</span>
+                <span class="text-[8px] font-black text-slate-400 uppercase">${entry.date}</span>
+                <span class="text-[11px] font-extrabold text-slate-700">${current.name}</span>
             </div>
-            <div class="font-mono font-black text-sm text-gray-900">Rs. ${entry[selectedFuelType]}</div>
+            <div class="bg-slate-50 px-3 py-1 rounded-lg">
+                <span class="text-sm font-black text-slate-800">Rs. ${entry[selectedFuelType]}</span>
+            </div>
         </div>
     `).join('');
+
+    list.innerHTML = tabsHTML + rowsHTML;
 }
 
-// 3. Vehicles
+// Vehicle & Calculator logic (Same as original)
 async function loadVehicles() {
     const vehicles = await db.vehicles.toArray();
     const list = document.getElementById('vehicleList');
     if (!list) return;
-    list.innerHTML = vehicles.length ? '' : '<p class="text-[10px] text-center text-gray-400 py-4 italic">No vehicles added.</p>';
+    list.innerHTML = vehicles.length ? '' : '<p class="text-xs text-center text-slate-400 py-8 italic">No vehicles added.</p>';
     vehicles.forEach(v => {
         const isActive = (selectedVehicle?.id === v.id);
         list.innerHTML += `
-            <div onclick="selectVehicle(${v.id})" class="p-3 rounded-xl border-2 transition-all cursor-pointer ${isActive ? 'border-blue-500 bg-blue-50' : 'border-gray-50 bg-gray-50'}">
-                <div class="flex justify-between items-center">
-                    <span class="text-xs font-black text-gray-800 uppercase">${v.plateNo}</span>
-                    <span class="text-[10px] font-bold text-gray-500">Fixed: Rs. ${v.fixedPrice}</span>
+            <div onclick="selectVehicle(${v.id})" class="p-4 mb-2 rounded-2xl border-2 cursor-pointer ${isActive ? 'border-blue-500 bg-blue-50' : 'border-white bg-white shadow-sm'}">
+                <div class="flex justify-between items-center uppercase font-black text-xs">
+                    <span>${v.plateNo}</span>
+                    <span class="text-slate-400">Fixed: Rs. ${v.fixedPrice}</span>
                 </div>
             </div>`;
     });
@@ -133,24 +135,21 @@ window.saveVehicle = async function() {
         await db.vehicles.add({ plateNo: plate.toUpperCase(), fixedPrice: price });
         document.getElementById('vehicleModal').classList.add('hidden');
         loadVehicles();
-        document.getElementById('vehPlateInput').value = '';
-        document.getElementById('vehFixedPriceInput').value = '';
     }
 };
 
-// 4. Calculator
 function addDateRangeRow() {
     rangesCount++;
     const container = document.getElementById('dateRangesContainer');
     const rowHTML = `
-        <div class="bg-gray-50 p-4 rounded-xl border border-gray-100 mb-2">
+        <div class="bg-white p-4 rounded-2xl border border-slate-100 mb-2">
             <div class="grid grid-cols-2 gap-2 mb-2">
-                <input type="text" id="start_date_${rangesCount}" class="bg-white p-2 rounded-lg text-xs font-bold border-0 shadow-sm" placeholder="Pick Date">
-                <input type="number" id="liters_${rangesCount}" step="0.01" class="bg-white p-2 rounded-lg text-xs font-bold text-right border-0 shadow-sm" placeholder="Liters" oninput="calculateTotalAdjustment()">
+                <input type="text" id="start_date_${rangesCount}" class="bg-slate-50 p-2 rounded-xl text-xs font-bold border-0" placeholder="Date">
+                <input type="number" id="liters_${rangesCount}" step="0.01" class="bg-slate-50 p-2 rounded-xl text-xs font-bold text-right border-0" placeholder="Liters" oninput="calculateTotalAdjustment()">
             </div>
-            <div class="flex justify-between items-center text-[9px] font-black text-gray-400">
-                <span id="priceInfo_${rangesCount}">---</span>
-                <span class="uppercase">Subtotal: Rs. <span id="subtotal_${rangesCount}" class="text-blue-600 font-mono">0.00</span></span>
+            <div class="flex justify-between items-center text-[9px] font-black text-slate-400">
+                <span id="priceInfo_${rangesCount}"></span>
+                <span>Subtotal: Rs. <span id="subtotal_${rangesCount}" class="text-blue-600">0.00</span></span>
             </div>
         </div>`;
     container.insertAdjacentHTML('beforeend', rowHTML);
@@ -167,7 +166,7 @@ function calculateTotalAdjustment() {
             const entry = allFuelHistory.find(p => p.date <= dVal) || allFuelHistory[allFuelHistory.length - 1];
             const diff = entry.lp92 - selectedVehicle.fixedPrice;
             const sub = diff * lVal;
-            document.getElementById(`priceInfo_${i}`).innerText = `Market Price (92): Rs. ${entry.lp92}`;
+            document.getElementById(`priceInfo_${i}`).innerText = `Market: Rs. ${entry.lp92}`;
             document.getElementById(`subtotal_${i}`).innerText = sub.toFixed(2);
             grandTotal += sub;
         }
@@ -181,16 +180,10 @@ function clearAllRanges() {
     document.getElementById('totalAdjustmentValue').innerText = '0.00'; 
 }
 
-// Init
 window.onload = () => {
     fetchLiveFuelData();
     loadVehicles();
-    
-    document.getElementById('refreshBtn').onclick = (e) => {
-        e.preventDefault();
-        fetchLiveFuelData();
-    };
-
+    document.getElementById('refreshBtn').addEventListener('click', fetchLiveFuelData);
     document.getElementById('addRangeBtn').addEventListener('click', addDateRangeRow);
     document.getElementById('clearAllRangesBtn').addEventListener('click', clearAllRanges);
 };
