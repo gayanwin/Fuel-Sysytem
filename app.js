@@ -1,67 +1,127 @@
-const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRFBYTixlf9JHq7oc523FFnWAB4NnGWkAu5Sy6ZNmdr_rHJHPZz7_mJf-XGgW8aT_yIj3Xv4wCnSTsQ/pub?output=csv';
-
 const db = new Dexie('FuelSystemDB');
-db.version(1).stores({ vehicles: '++id, plateNo, fixedPrice' });
+db.version(1).stores({
+    vehicles: '++id, plateNo, fixedPrice',
+    calculations: '++id, vehicleId, adjustment, createdAt'
+});
 
-let allFuelHistory = [];
-let selectedFuelType = 'lp92';
+let livePrices = []; 
+let currentPricesObj = { lp92: 0, lp95: 0, lad: 0, lsd: 0 };
 
 async function fetchLiveFuelData() {
-    console.log("Starting data fetch...");
+    const statusEl = document.getElementById('systemStatus');
+    showLockScreen("Fetching Data", "Connecting...", true);
+    
+    // මේ ලින්ක් එකයි හරිම ක්‍රමයයි. මේකෙන් Cache වෙන්නෙත් නෑ, Proxy ලෙඩ එන්නෙත් නෑ.
+    const sheetUrl = `https://docs.google.com/spreadsheets/d/1jAn5mIjtawXGqfRxzISZjMkxLxgv3KlbtYS5JZuVDq0/export?format=csv&gid=0&t=${new Date().getTime()}`;
+    
     try {
-        const response = await fetch(`${CSV_URL}&cache=${new Date().getTime()}`);
-        const text = await response.text();
+        // Proxy නැතුව කෙලින්ම Fetch කරනවා. Cors ප්‍රශ්නයක් ආවොත් විතරක් මේක වෙනස් කරමු.
+        const response = await fetch(sheetUrl);
+        if (!response.ok) throw new Error('Network response was not ok');
         
-        // CSV parsing logic
-        const rows = text.split('\n')
-            .map(row => row.split(',').map(c => c.replace(/"/g, '').trim()))
-            .filter(r => r.length > 1 && r[0].toLowerCase() !== 'date');
+        const csvText = await response.text();
+        const rows = csvText.split('\n').map(row => row.split(',').map(cell => cell.replace(/^"(.*)"$/, '$1').trim()));
 
-        if (rows.length > 0) {
-            const latest = rows[rows.length - 1];
-            
-            // UI elements update
-            document.getElementById('price_lp92').innerText = latest[1];
-            document.getElementById('price_lp95').innerText = latest[2];
-            document.getElementById('price_lad').innerText = latest[3];
-            document.getElementById('price_lsd').innerText = latest[4];
+        // දින වකවානුවක් තියෙන පේළි ටික ගන්නවා (2026.04.01 ඇතුළුව)
+        let allData = rows.filter(r => r[0] && /\d/.test(r[0]) && r[0].includes('.')).map(r => ({
+            date: r[0],
+            p95: parseFloat(r[1]) || 0,
+            p92: parseFloat(r[2]) || 0,
+            pLAD: parseFloat(r[3]) || 0,
+            pLSD: parseFloat(r[4]) || 0
+        }));
 
-            allFuelHistory = rows.map(r => ({
-                date: r[0],
-                lp92: parseFloat(r[1]) || 0,
-                lp95: parseFloat(r[2]) || 0,
-                lad: parseFloat(r[3]) || 0,
-                lsd: parseFloat(r[4]) || 0
-            })).reverse();
+        if (allData.length === 0) throw new Error("No data found");
 
-            updateLivePricesUI();
-            document.getElementById('systemStatus').innerHTML = '<span class="text-green-500 font-black">● LIVE SYNC</span>';
+        const latest = allData[0];
+        currentPricesObj = { lp95: latest.p95, lp92: latest.p92, lad: latest.pLAD, lsd: latest.pLSD };
+        livePrices = allData.slice(0, 5).map(item => ({ date: item.date, price: item.p92 }));
+
+        updateTopWidgets();
+        updateLivePricesUI();
+        if(statusEl) statusEl.innerHTML = '<i class="fa-solid fa-check-circle"></i><span>Online</span>';
+        hideLockScreen();
+    } catch (e) {
+        console.error("Fetch Error:", e);
+        // මෙතනදි තමයි "Check Internet" කියන එක පෙන්නන්නේ. 
+        // ඒක නිසා මම ආයෙත් පරණ stable proxy එකක් backend එකට දැම්මා backup එකක් විදිහට.
+        try {
+            const backupProxy = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(sheetUrl)}`;
+            const res = await fetch(backupProxy);
+            const text = await res.text();
+            // ... (ඉතුරු ටික පරණ විදිහටම වැඩ කරයි)
+            processData(text); 
+        } catch(err) {
+            showLockScreen("Offline", "Check Internet Connection", false);
         }
-    } catch (err) {
-        console.error("Critical error:", err);
-        document.getElementById('systemStatus').innerText = "CONNECTION ERROR";
     }
+}
+
+// දත්ත Process කරන කොටස ලේසි වෙන්න වෙනම Function එකකට ගත්තා
+function processData(csvText) {
+    const rows = csvText.split('\n').map(row => row.split(',').map(cell => cell.replace(/^"(.*)"$/, '$1').trim()));
+    let allData = rows.filter(r => r[0] && /\d/.test(r[0]) && r[0].includes('.')).map(r => ({
+        date: r[0], p95: parseFloat(r[1]) || 0, p92: parseFloat(r[2]) || 0, pLAD: parseFloat(r[3]) || 0, pLSD: parseFloat(r[4]) || 0
+    }));
+    const latest = allData[0];
+    currentPricesObj = { lp95: latest.p95, lp92: latest.p92, lad: latest.pLAD, lsd: latest.pLSD };
+    livePrices = allData.slice(0, 5).map(item => ({ date: item.date, price: item.p92 }));
+    updateTopWidgets();
+    updateLivePricesUI();
+    document.getElementById('systemStatus').innerHTML = '<i class="fa-solid fa-check-circle"></i><span>Online</span>';
+    hideLockScreen();
+}
+
+function updateTopWidgets() {
+    document.getElementById('price_lp92').innerText = currentPricesObj.lp92.toFixed(0);
+    document.getElementById('price_lp95').innerText = currentPricesObj.lp95.toFixed(0);
+    document.getElementById('price_lad').innerText = currentPricesObj.lad.toFixed(0);
+    document.getElementById('price_lsd').innerText = currentPricesObj.lsd.toFixed(0);
 }
 
 function updateLivePricesUI() {
     const list = document.getElementById('priceHistoryList');
-    if (!list) return;
-    const titles = { 'lp92': '92 Octane', 'lp95': '95 Octane', 'lad': 'Auto Diesel', 'lsd': 'Super Diesel' };
-    
-    let html = `<div class="flex justify-center gap-2 mb-4">` + 
-        ['lp92','lp95','lad','lsd'].map(k => `<button onclick="setFuelTab('${k}')" class="px-3 py-1.5 rounded-xl text-[10px] font-black border ${selectedFuelType===k?'bg-slate-800 text-white':'bg-white text-slate-400'}">${k.toUpperCase()}</button>`).join('') + `</div>`;
-    
-    html += allFuelHistory.slice(0, 6).map(e => `
-        <div class="flex items-center justify-between p-3 bg-white border border-slate-100 rounded-2xl mb-2 shadow-sm">
-            <div class="flex flex-col"><span class="text-[8px] font-black text-slate-400">${e.date}</span><span class="text-[11px] font-extrabold text-slate-700">${titles[selectedFuelType]}</span></div>
-            <div class="bg-slate-50 px-3 py-1 rounded-lg"><span class="text-sm font-black text-slate-800">Rs. ${e[selectedFuelType]}</span></div>
-        </div>`).join('');
-    list.innerHTML = html;
+    list.innerHTML = '';
+    livePrices.forEach((entry, idx) => {
+        let isLatest = idx === 0;
+        let badge = isLatest ? `<span class="bg-brand-100 text-brand-700 text-[10px] font-bold px-2 py-0.5 rounded ml-2 uppercase">Current</span>` : '';
+        let borderCls = isLatest ? 'border-brand-200 bg-white shadow-sm' : 'border-slate-100 bg-slate-50/50';
+        list.innerHTML += `
+            <div class="flex items-center justify-between p-3 rounded-xl border ${borderCls} mb-2">
+                <div class="flex flex-col">
+                    <span class="text-xs font-bold text-slate-500 uppercase flex items-center"><i class="fa-regular fa-calendar-days mr-1.5"></i> ${entry.date} ${badge}</span>
+                    <span class="text-sm font-semibold text-slate-700 mt-0.5">Lanka Petrol 92 Octane</span>
+                </div>
+                <div class="text-right">
+                    <span class="text-xs text-slate-400">Rs.</span>
+                    <span class="text-xl font-black text-brand-600">${entry.price.toFixed(2)}</span>
+                </div>
+            </div>`;
+    });
 }
 
-window.setFuelTab = (t) => { selectedFuelType = t; updateLivePricesUI(); };
+function showLockScreen(t, d, s) { 
+    document.getElementById('offlineLock').classList.remove('hidden');
+    document.getElementById('lockTitle').innerText = t;
+    document.getElementById('lockDesc').innerText = d;
+}
+function hideLockScreen() { document.getElementById('offlineLock').classList.add('hidden'); }
 
-window.onload = () => { 
-    fetchLiveFuelData(); 
-    // loadVehicles function එක මෙතන තිබුණා නම් ඒකත් ලියන්න
-};
+async function loadVehicles() {
+    const vehicles = await db.vehicles.toArray();
+    const list = document.getElementById('vehicleList');
+    list.innerHTML = vehicles.length ? '' : '<div class="text-[10px] font-bold text-slate-400 text-center py-4 uppercase tracking-wider">No Saved Vehicles</div>';
+    vehicles.forEach(v => {
+        list.innerHTML += `<div onclick="selectVehicle(${v.id})" class="p-3 rounded-xl border border-slate-200 mb-2 cursor-pointer uppercase font-black text-xs hover:border-brand-600 hover:bg-brand-50 transition-all text-slate-600">${v.plateNo}</div>`;
+    });
+}
+
+async function selectVehicle(id) {
+    const v = await db.vehicles.get(id);
+    document.getElementById('activeVehicleLabel').innerText = v.plateNo;
+    document.getElementById('calculatorPanel').classList.remove('hidden');
+    document.getElementById('noVehicleWarning').classList.add('hidden');
+}
+
+window.onload = () => { fetchLiveFuelData(); loadVehicles(); };
+document.getElementById('refreshPricesBtn').addEventListener('click', fetchLiveFuelData);
