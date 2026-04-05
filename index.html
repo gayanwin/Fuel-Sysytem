@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="si">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fuel Price Adjustment & Calculation System</title>
+
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        brand: {
+                            50: '#f0fdf4',
+                            100: '#dcfce7',
+                            500: '#22c55e',
+                            600: '#16a34a',
+                            700: '#15803d',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- Flatpickr Theme -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+
+    <!-- Animate.css for gorgeous animations -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css" />
+
+    <!-- Dexie for IndexedDB -->
+    <script src="https://unpkg.com/dexie/dist/dexie.js"></script>
+
+    <!-- Custom Styles -->
+    <style>
+        body {
+            background-color: #fafafa;
+        }
+
+        .glass-panel {
+            background: #ffffff;
+            border: 1px solid #e5e5e5;
+            box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.03);
+        }
+
+        .flatpickr-calendar {
+            font-family: 'Inter', sans-serif !important;
+            border-radius: 16px !important;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04) !important;
+            border: 1px solid #f1f5f9 !important;
+            width: 280px !important;
+        }
+
+        .flatpickr-day {
+            border-radius: 8px !important;
+            font-weight: 500;
+        }
+
+        .flatpickr-months .flatpickr-month {
+            margin-bottom: 6px;
+        }
+
+        .loading-pulse {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: .5;
+            }
+        }
+
+        /* Hide scrollbar for select/options */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+    </style>
+</head>
+
+<body class="text-slate-800 antialiased min-h-screen pb-12">
+
+    <!-- Strict Lock Overlay -->
+    <div id="offlineLock"
+        class="fixed inset-0 z-[100] bg-slate-900/80 backdrop-blur-md flex flex-col items-center justify-center text-white transition-opacity duration-300">
+        <i id="lockIcon" class="fa-solid fa-satellite-dish text-6xl mb-4 text-brand-500 animate-pulse"></i>
+        <h2 id="lockTitle" class="text-2xl font-bold mb-2">Fetching Live Data...</h2>
+        <p id="lockDesc" class="text-slate-300 text-sm max-w-md text-center">System is strictly locked until real-time
+            fuel prices are fetched. No offline or fallback data allowed.</p>
+        <button id="lockRetryBtn" onclick="fetchLiveFuelData()"
+            class="hidden mt-6 px-6 py-2.5 bg-brand-500 hover:bg-brand-400 rounded-xl shadow-lg shadow-brand-500/30 text-sm font-semibold transition-all">
+            Retry Connection <i class="fa-solid fa-rotate-right ml-1"></i>
+        </button>
+    </div>
+
+    <!-- Navbar -->
+    <nav class="bg-white border-b border-slate-200 sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16 items-center">
+                <div class="flex items-center gap-3">
+                    <div class="bg-brand-500 rounded-lg p-2 text-white shadow-sm shadow-brand-500/30">
+                        <i class="fa-solid fa-gas-pump text-xl"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-lg font-bold leading-tight">Fuel Adjustment</h1>
+                        <p class="text-xs text-slate-500">Live Price Calculation System</p>
+                    </div>
+                </div>
+
+                <!-- System Status -->
+                <div id="systemStatus"
+                    class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-50 text-amber-600 text-xs font-semibold border border-amber-200 transition-colors duration-300">
+                    <i class="fa-solid fa-circle-notch fa-spin"></i>
+                    <span>Updating Live Prices...</span>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6 relative">
+
+        <!-- Top 4 Main Fuels Widget -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+            <!-- LP 92 -->
+            <div
+                class="bg-gradient-to-br from-amber-400 to-orange-500 p-4 rounded-2xl flex items-center justify-between shadow-lg shadow-amber-500/20 relative overflow-hidden group hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300">
+                <div
+                    class="absolute -right-4 -bottom-6 opacity-20 text-white transform group-hover:scale-125 group-hover:rotate-12 transition-transform duration-500 pointer-events-none">
+                    <i class="fa-solid fa-gas-pump text-7xl"></i>
+                </div>
+                <div class="relative z-10 w-full">
+                    <div class="flex justify-between items-center mb-1">
+                        <span
+                            class="text-[10px] sm:text-xs font-black text-white/90 uppercase tracking-[0.2em] bg-white/20 px-2 py-0.5 rounded-md backdrop-blur-sm">LP
+                            - 92</span>
+                        <span id="date_lp92"
+                            class="text-xs font-black text-white bg-black/20 px-2 py-1 rounded-md backdrop-blur-md shadow-sm border border-white/10 tracking-widest">--.--.--</span>
+                    </div>
+                    <div class="flex items-baseline gap-1 mt-1">
+                        <span class="text-sm font-semibold text-white/80">Rs.</span>
+                        <span id="price_lp92"
+                            class="text-3xl font-black text-white tracking-tight drop-shadow-sm">---</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- LP 95 -->
+            <div
+                class="bg-gradient-to-br from-rose-400 to-pink-600 p-4 rounded-2xl flex items-center justify-between shadow-lg shadow-rose-500/20 relative overflow-hidden group hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300">
+                <div
+                    class="absolute -right-4 -bottom-6 opacity-20 text-white transform group-hover:scale-125 group-hover:-rotate-12 transition-transform duration-500 pointer-events-none">
+                    <i class="fa-solid fa-gas-pump text-7xl"></i>
+                </div>
+                <div class="relative z-10 w-full">
+                    <div class="flex justify-between items-center mb-1">
+                        <span
+                            class="text-[10px] sm:text-xs font-black text-white/90 uppercase tracking-[0.2em] bg-white/20 px-2 py-0.5 rounded-md backdrop-blur-sm">LP
+                            - 95</span>
+                        <span id="date_lp95"
+                            class="text-xs font-black text-white bg-black/20 px-2 py-1 rounded-md backdrop-blur-md shadow-sm border border-white/10 tracking-widest">--.--.--</span>
+                    </div>
+                    <div class="flex items-baseline gap-1 mt-1">
+                        <span class="text-sm font-semibold text-white/80">Rs.</span>
+                        <span id="price_lp95"
+                            class="text-3xl font-black text-white tracking-tight drop-shadow-sm">---</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- LAD -->
+            <div
+                class="bg-gradient-to-br from-indigo-400 to-blue-600 p-4 rounded-2xl flex items-center justify-between shadow-lg shadow-blue-500/20 relative overflow-hidden group hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300">
+                <div
+                    class="absolute -right-4 -bottom-6 opacity-20 text-white transform group-hover:scale-125 group-hover:rotate-12 transition-transform duration-500 pointer-events-none">
+                    <i class="fa-solid fa-oil-can text-7xl"></i>
+                </div>
+                <div class="relative z-10 w-full">
+                    <div class="flex justify-between items-center mb-1">
+                        <span
+                            class="text-[10px] sm:text-xs font-black text-white/90 uppercase tracking-[0.2em] bg-white/20 px-2 py-0.5 rounded-md backdrop-blur-sm">LAD</span>
+                        <span id="date_lad"
+                            class="text-xs font-black text-white bg-black/20 px-2 py-1 rounded-md backdrop-blur-md shadow-sm border border-white/10 tracking-widest">--.--.--</span>
+                    </div>
+                    <div class="flex items-baseline gap-1 mt-1">
+                        <span class="text-sm font-semibold text-white/80">Rs.</span>
+                        <span id="price_lad"
+                            class="text-3xl font-black text-white tracking-tight drop-shadow-sm">---</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- LSD -->
+            <div
+                class="bg-gradient-to-br from-emerald-400 to-teal-600 p-4 rounded-2xl flex items-center justify-between shadow-lg shadow-emerald-500/20 relative overflow-hidden group hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300">
+                <div
+                    class="absolute -right-4 -bottom-6 opacity-20 text-white transform group-hover:scale-125 group-hover:-rotate-12 transition-transform duration-500 pointer-events-none">
+                    <i class="fa-solid fa-oil-can text-7xl"></i>
+                </div>
+                <div class="relative z-10 w-full">
+                    <div class="flex justify-between items-center mb-1">
+                        <span
+                            class="text-[10px] sm:text-xs font-black text-white/90 uppercase tracking-[0.2em] bg-white/20 px-2 py-0.5 rounded-md backdrop-blur-sm">LSD</span>
+                        <span id="date_lsd"
+                            class="text-xs font-black text-white bg-black/20 px-2 py-1 rounded-md backdrop-blur-md shadow-sm border border-white/10 tracking-widest">--.--.--</span>
+                    </div>
+                    <div class="flex items-baseline gap-1 mt-1">
+                        <span class="text-sm font-semibold text-white/80">Rs.</span>
+                        <span id="price_lsd"
+                            class="text-3xl font-black text-white tracking-tight drop-shadow-sm">---</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 relative">
+
+            <!-- Left Column: Data & Management -->
+            <div class="lg:col-span-4 space-y-6 flex flex-col">
+
+                <!-- Live Prices Widget -->
+                <div class="glass-panel rounded-2xl p-5 order-2 shadow-sm">
+                    <div class="flex items-center justify-center relative mb-4">
+                        <h2 class="text-md font-bold text-slate-700"><i
+                                class="fa-solid fa-chart-line text-brand-500 mr-2"></i>Live Fuel Prices</h2>
+                        <button id="refreshPricesBtn"
+                            class="absolute right-0 text-slate-400 hover:text-brand-500 transition-colors"
+                            title="Refresh Prices">
+                            <i class="fa-solid fa-rotate-right"></i>
+                        </button>
+                    </div>
+
+                    <!-- Price History List -->
+                    <div class="space-y-3 relative" id="priceHistoryList">
+                        <!-- Skeleton Loader -->
+                        <div class="loading-pulse bg-slate-100 rounded-lg p-3 h-14 w-full"></div>
+                        <div class="loading-pulse bg-slate-100 rounded-lg p-3 h-14 w-full"></div>
+                        <div class="loading-pulse bg-slate-100 rounded-lg p-3 h-14 w-full"></div>
+                    </div>
+                    <div class="mt-3 text-[10px] text-slate-400 text-center"><i
+                            class="fa-solid fa-circle-info mr-1"></i>Last 5 revisions fetched from CEYPETCO</div>
+                </div>
+
+            </div>
+
+            <!-- Right Column: Calculator -->
+            <div class="lg:col-span-8">
+                <div class="glass-panel rounded-2xl p-6 shadow-lg shadow-slate-200/50">
+                    <div class="flex items-center justify-between mb-6 border-b border-slate-100 pb-4">
+                        <h2 class="text-xl font-bold text-slate-800"><i
+                                class="fa-solid fa-calculator text-brand-500 mr-2"></i>Adjustment Calculator</h2>
+                    </div>
+
+                    <div class="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <!-- Vehicle Selection -->
+                        <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 relative group md:col-span-2">
+                            <div class="flex flex-col md:flex-row gap-6 items-start md:items-center">
+                                <div class="w-full md:w-1/3">
+                                    <div class="flex justify-between items-center mb-2">
+                                        <label
+                                            class="text-xs font-bold text-slate-500 uppercase tracking-wide">Vehicle</label>
+                                        <div class="flex items-center gap-1.5">
+                                            <button onclick="editSelectedVehicle()" id="btnEditVehicle"
+                                                class="hidden text-[10px] bg-amber-100 text-amber-700 font-bold px-2 py-0.5 rounded hover:bg-amber-200 transition-colors shadow-sm"
+                                                title="Edit Vehicle"><i class="fa-solid fa-pen"></i></button>
+                                            <button onclick="openManageVehiclesModal()"
+                                                class="text-[10px] bg-purple-100 text-purple-700 font-bold px-2 py-0.5 rounded hover:bg-purple-200 transition-colors shadow-sm">
+                                                <i class="fa-solid fa-list mr-1"></i> DB
+                                            </button>
+                                            <button onclick="openVehicleModal()"
+                                                class="text-[10px] bg-blue-100 text-blue-600 font-bold px-2 py-0.5 rounded hover:bg-blue-200 transition-colors shadow-sm">
+                                                <i class="fa-solid fa-plus mr-1"></i> New
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="relative">
+                                        <select id="vehicleDropdown" onchange="selectVehicleFromDropdown()"
+                                            class="w-full bg-white border border-brand-200 rounded-lg px-3 py-3 text-sm font-black text-brand-700 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all cursor-pointer appearance-none shadow-sm">
+                                            <option value="" disabled selected>-- Choose from DB --</option>
+                                        </select>
+                                        <i
+                                            class="fa-solid fa-chevron-down absolute right-4 top-4 text-brand-400 text-xs pointer-events-none"></i>
+                                    </div>
+                                </div>
+
+                                <!-- Selected Vehicle Info Widget -->
+                                <div id="selectedVehicleInfo"
+                                    class="hidden w-full md:w-2/3 animate__animated animate__fadeIn">
+                                    <!-- Populated dynamically by JS -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Master Date Range -->
+                        <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 relative group md:col-span-2">
+                            <div class="flex justify-between items-center mb-2">
+                                <label class="text-xs font-bold text-slate-500 uppercase tracking-wide">Calculation
+                                    Period</label>
+                                <span
+                                    class="text-[9px] bg-brand-100 text-brand-700 font-black px-2 py-0.5 rounded shadow-sm border border-brand-200 uppercase tracking-wider">Auto
+                                    Split</span>
+                            </div>
+                            <div class="flex flex-col sm:flex-row gap-3">
+                                <div class="relative w-full sm:w-1/2">
+                                    <input type="text" id="calcStartDate" disabled placeholder="Start Date"
+                                        class="w-full bg-white border border-slate-300 rounded-lg px-2 py-2 text-sm font-bold text-slate-700 outline-none border-dashed focus:border-solid focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all cursor-pointer disabled:bg-slate-100 disabled:text-slate-300 disabled:cursor-not-allowed shadow-sm text-center tracking-wider">
+                                </div>
+                                <div class="relative w-full sm:w-1/2">
+                                    <input type="text" id="calcEndDate" disabled placeholder="End Date"
+                                        class="w-full bg-white border border-slate-300 rounded-lg px-2 py-2 text-sm font-bold text-slate-700 outline-none border-dashed focus:border-solid focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all cursor-pointer disabled:bg-slate-100 disabled:text-slate-300 disabled:cursor-not-allowed shadow-sm text-center tracking-wider">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Run Km -->
+                        <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 relative group">
+                            <label class="text-xs font-bold text-slate-500 uppercase tracking-wide block mb-2">Total
+                                Driven Distance (Km)</label>
+                            <input type="number" id="calcRunKm" placeholder="ex: 2000" oninput="updateCalculations()"
+                                class="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-slate-700 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all shadow-sm">
+                        </div>
+
+                        <!-- OT Hours -->
+                        <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 relative group">
+                            <label class="text-xs font-bold text-slate-500 uppercase tracking-wide block mb-2">Total OT
+                                Hours</label>
+                            <input type="number" id="calcOTHours" placeholder="ex: 45.5" step="0.5"
+                                oninput="updateCalculations()"
+                                class="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-slate-700 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all shadow-sm">
+                        </div>
+                    </div>
+
+                    <!-- Active Vehicle Selection Error -->
+                    <div id="noVehicleWarning"
+                        class="p-4 mb-6 text-sm text-blue-800 rounded-xl bg-blue-50 border border-blue-100 flex items-center gap-3 shadow-sm animate__animated animate__fadeIn">
+                        <i class="fa-solid fa-circle-info text-xl text-blue-500"></i>
+                        <div>Please choose a vehicle from the dropdown above to continue.</div>
+                    </div>
+
+                    <div id="calculatorPanel" class="hidden">
+                        <div id="calculationWaitContainer"
+                            class="flex flex-col items-center justify-center p-8 border-2 border-dashed border-slate-200 rounded-xl bg-slate-50 text-slate-400 mt-6 animate__animated animate__fadeIn">
+                            <i class="fa-solid fa-gauge-high text-3xl mb-3 text-brand-400 opacity-50"></i>
+                            <span class="text-sm font-medium">Please enter Total Driven Distance (Km) to view
+                                calculation.</span>
+                        </div>
+
+                        <div id="calculationResultsContainer" class="hidden animate__animated animate__fadeIn">
+                            <div class="mb-3">
+                                <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest"><i
+                                        class="fa-solid fa-layer-group text-slate-300 mr-1.5"></i> Price Breakdown</h3>
+                            </div>
+                            <div class="space-y-3 mb-6 min-h-[80px]" id="dateRangesContainer">
+                                <!-- Ranges injected here automatically -->
+                            </div>
+
+                            <!-- Bill Summary Container -->
+                            <div id="billSummaryContainer"></div>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Minimal Footprint Footer -->
+        <footer
+            class="mt-12 text-center animate__animated animate__fadeIn pb-6 opacity-80 hover:opacity-100 transition-opacity">
+            <div class="flex flex-col items-center justify-center space-y-1">
+                <div
+                    class="text-xs font-bold text-slate-500 tracking-[0.15em] flex items-center justify-center drop-shadow-sm">
+                    Engineered By <span class="font-black text-brand-600 ml-2">Gayan Chinthaka</span> <span
+                        class="text-[10px] text-slate-400 ml-1.5 font-extrabold">(MA)</span>
+                </div>
+                <div class="text-[10px] font-black text-slate-400 tracking-[0.25em] drop-shadow-sm mt-1">
+                    Kurunegala Account Section <span class="mx-1.5">|</span> <span
+                        class="text-blue-500 font-extrabold text-xs">NWSDB</span>
+                </div>
+            </div>
+        </footer>
+    </main>
+
+    <!-- Add Vehicle Modal -->
+    <div id="vehicleModal"
+        class="hidden fixed inset-0 z-[100] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 opacity-0 transition-opacity duration-300">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md transform scale-95 transition-transform duration-300"
+            id="vehicleModalContent">
+            <div class="p-6 border-b border-slate-100 flex justify-between items-center">
+                <h3 id="vehModalTitle" class="text-lg font-bold text-slate-800">Add New Vehicle</h3>
+                <button onclick="closeVehicleModal()"
+                    class="text-slate-400 hover:text-red-500 transition-colors text-lg">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+                <input type="hidden" id="vehIdInput">
+                <div class="mb-2">
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Vehicle Name / License Plate</label>
+                    <input type="text" id="vehPlateInput" placeholder="ex: Double Cab, Van, or ABC-1234"
+                        class="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all uppercase placeholder-normal placeholder:lowercase placeholder:text-slate-400">
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">Fuel Type</label>
+                        <select id="vehFuelTypeInput"
+                            class="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all font-semibold text-slate-700">
+                            <option value="p92">LP - 92</option>
+                            <option value="p95">LP - 95</option>
+                            <option value="lad">LAD</option>
+                            <option value="lsd">LSD</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">Fixed Fuel Price (Rs/L)</label>
+                        <input type="number" id="vehFixedPriceInput" placeholder="ex: 350.00" step="0.01"
+                            class="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all font-mono">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4 border-t border-slate-100 pt-4 mt-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">Owner Name</label>
+                        <input type="text" id="vehOwnerNameInput" placeholder="ex: Kamal Perera"
+                            class="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all text-slate-700 font-semibold">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">Contact Number</label>
+                        <input type="text" id="vehContactInput" placeholder="ex: 0771234567"
+                            class="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all text-slate-700 font-mono">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Address</label>
+                    <input type="text" id="vehAddressInput" placeholder="ex: 123, Main Rd, Kurunegala"
+                        class="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all text-slate-700 font-semibold">
+                </div>
+                <div class="grid grid-cols-2 gap-4 border-t border-slate-100 pt-4 mt-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">Base Km Limit</label>
+                        <input type="number" id="vehBaseKmInput" placeholder="ex: 1500" value="1500"
+                            class="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all font-mono text-slate-700">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">Approved Total Km
+                            (Contract)</label>
+                        <input type="number" id="vehApprovedKmInput" placeholder="ex: 2000" value="2000"
+                            class="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all font-mono text-brand-600 font-bold bg-brand-50">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-600 mb-1">Base Price / Rent
+                            (Rs)</label>
+                        <input type="number" id="vehBasePriceInput" placeholder="ex: 150000"
+                            class="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all font-mono">
+                    </div>
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-600 mb-1">Rate / Km (If < Base
+                                Limit)</label>
+                                <input type="number" id="vehRatePerKmUnderBaseInput" placeholder="ex: 100"
+                                    class="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all font-mono">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-600 mb-1">Extra Km Rate (Rs)</label>
+                        <input type="number" id="vehExtraKmRateInput" placeholder="ex: 80"
+                            class="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all font-mono">
+                    </div>
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-600 mb-1">OT Rate / Hr (Rs)</label>
+                        <input type="number" id="vehOtRateInput" placeholder="ex: 200"
+                            class="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all font-mono">
+                    </div>
+                </div>
+
+                <div class="border-t border-slate-100 pt-4 mt-4">
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Fuel Efficiency (Km/L)</label>
+                    <input type="number" id="vehKmPerLtrInput" placeholder="ex: 8"
+                        class="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition-all font-mono">
+                </div>
+
+                <div id="vehError"
+                    class="text-xs text-red-500 hidden font-semibold bg-red-50 p-2 rounded border border-red-100 mt-2">
+                </div>
+            </div>
+            <div class="p-6 pt-2 bg-slate-50 rounded-b-2xl flex justify-end gap-3">
+                <button onclick="closeVehicleModal()"
+                    class="px-5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-200 rounded-lg transition-colors">Cancel</button>
+                <button onclick="saveVehicle()"
+                    class="px-5 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors shadow-md shadow-blue-600/20">Save
+                    Vehicle</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Manage Vehicles Modal -->
+    <div id="manageVehiclesModal"
+        class="hidden fixed inset-0 z-[100] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 opacity-0 transition-opacity duration-300">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl transform scale-95 transition-transform duration-300"
+            id="manageVehiclesModalContent">
+            <div class="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50 rounded-t-2xl">
+                <h3 class="text-lg font-bold text-slate-800"><i class="fa-solid fa-database text-brand-500 mr-2"></i>
+                    Vehicle Database Management</h3>
+                <button onclick="closeManageVehiclesModal()"
+                    class="text-slate-400 hover:text-red-500 transition-colors text-lg">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="p-4 overflow-x-auto max-h-[65vh] overflow-y-auto">
+                <table class="w-full text-left border-collapse whitespace-nowrap">
+                    <thead>
+                        <tr class="bg-slate-100 text-slate-600 text-[10px] uppercase tracking-wider">
+                            <th class="p-3 rounded-tl-lg">Plate No</th>
+                            <th class="p-3">Fuel Type</th>
+                            <th class="p-3">Fixed Price</th>
+                            <th class="p-3">KM/L</th>
+                            <th class="p-3">Base KM</th>
+                            <th class="p-3">Base Rs</th>
+                            <th class="p-3">Extra Rs/KM</th>
+                            <th class="p-3">OT Rs/Hr</th>
+                            <th class="p-3 rounded-tr-lg text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="manageVehiclesTableBody" class="text-sm">
+                        <!-- Populated via JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden Invoice Template for PDF Generation -->
+    <div id="invoiceTemplateContainer" class="absolute -left-[9999px] top-0 pointer-events-none">
+        <div id="invoiceTemplate"
+            class="bg-white px-8 pt-6 pb-4 w-[794px] min-h-[1122px] text-slate-800 font-sans border-2 border-slate-200 box-border flex flex-col relative bg-cover bg-center"
+            style="font-family: 'Inter', sans-serif;">
+
+            <!-- Header -->
+            <div class="flex justify-between items-center pb-4 mb-4 border-b-2 border-slate-100">
+                <div class="flex items-center gap-5">
+                    <div
+                        class="w-16 h-16 bg-brand-600 rounded-2xl flex items-center justify-center text-white text-3xl shadow-sm">
+                        <i class="fa-solid fa-droplet"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-2xl font-black text-slate-900 tracking-tight uppercase">National Water Supply
+                        </h1>
+                        <h2 class="text-lg font-bold text-slate-600 tracking-wide">& Drainage Board</h2>
+                        <p class="text-xs font-bold text-brand-500 mt-1 uppercase tracking-[0.2em]">Kurunegala Account
+                            Section</p>
+                    </div>
+                </div>
+                <div class="text-right">
+                    <h3 class="text-3xl font-black text-slate-800 uppercase tracking-tighter mb-1">Invoice</h3>
+                    <p class="text-xs font-bold text-slate-400 tracking-widest uppercase">System Generated</p>
+                </div>
+            </div>
+
+            <!-- Meta Data Row -->
+            <div class="flex justify-between items-center mb-4 bg-slate-50 rounded-xl p-4 border border-slate-100">
+                <div>
+                    <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Bill Type</p>
+                    <p class="text-sm font-bold text-slate-700">Fuel Adjustment Calculation</p>
+                </div>
+                <div class="text-right">
+                    <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Generated On</p>
+                    <p class="text-sm font-bold text-slate-700 font-mono" id="invGeneratedDate"></p>
+                </div>
+            </div>
+
+            <!-- Vehicle & Period Info -->
+            <div class="grid grid-cols-2 gap-4 mb-4">
+                <div>
+                    <h4 class="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center"><i
+                            class="fa-solid fa-car mr-2"></i> Vehicle Details</h4>
+                    <div class="space-y-1.5 text-sm">
+                        <p class="flex justify-between items-start border-b border-slate-100 pb-1.5"><span
+                                class="font-semibold text-slate-500 whitespace-nowrap mr-2">License Plate:</span> <span
+                                class="font-black text-slate-800 text-base uppercase text-right" id="invPlateNo"></span>
+                        </p>
+                        <p class="flex justify-between items-start border-b border-slate-100 pb-1.5"><span
+                                class="font-semibold text-slate-500 whitespace-nowrap mr-2">Owner Name:</span> <span
+                                class="font-bold text-slate-700 text-right" id="invOwnerName"></span></p>
+                        <p class="flex justify-between items-start border-b border-slate-100 pb-1.5"><span
+                                class="font-semibold text-slate-500 whitespace-nowrap mr-2">Contact:</span> <span
+                                class="font-bold text-slate-700 font-mono text-right" id="invContact"></span></p>
+                        <p class="flex justify-between items-start border-b border-slate-100 pb-1.5"><span
+                                class="font-semibold text-slate-500 whitespace-nowrap mr-2">Address:</span> <span
+                                class="font-bold text-slate-700 text-right" id="invAddress"></span></p>
+                        <p class="flex justify-between items-start border-b border-slate-100 pb-1.5"><span
+                                class="font-semibold text-slate-500 whitespace-nowrap mr-2">Fuel Type:</span> <span
+                                class="font-bold text-slate-700 text-right" id="invFuelType"></span></p>
+                        <p class="flex justify-between items-start border-b border-slate-100 pb-1.5"><span
+                                class="font-semibold text-slate-500 whitespace-nowrap mr-2">Fixed Fuel Price:</span>
+                            <span class="font-bold text-slate-700 font-mono text-right">Rs. <span
+                                    id="invFixedPrice"></span></span></p>
+                        <p class="flex justify-between items-start pb-1.5"><span
+                                class="font-semibold text-slate-500 whitespace-nowrap mr-2">Fuel Efficiency:</span>
+                            <span class="font-bold text-slate-700 font-mono text-right"><span id="invFuelEff"></span>
+                                Km/L</span></p>
+                    </div>
+                </div>
+                <div>
+                    <h4 class="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center"><i
+                            class="fa-solid fa-calendar-alt mr-2"></i> Parameters</h4>
+                    <div class="space-y-1.5 text-sm">
+                        <p class="flex justify-between items-center border-b border-slate-100 pb-1.5"><span
+                                class="font-semibold text-slate-500">Calculation Period:</span> <span
+                                class="font-bold text-slate-800 font-mono" id="invPeriod"></span></p>
+                        <p class="flex justify-between items-center border-b border-slate-100 pb-1.5"><span
+                                class="font-semibold text-slate-500">Total Run Distance:</span> <span
+                                class="font-black text-slate-800 font-mono text-base"><span id="invTotalKm"></span>
+                                Km</span></p>
+                        <p class="flex justify-between items-center border-b border-slate-100 pb-1.5"><span
+                                class="font-semibold text-slate-500">Base Limit:</span> <span
+                                class="font-bold text-slate-700 font-mono"><span id="invBaseKm"></span> Km</span></p>
+                        <p class="flex justify-between items-center pb-1.5"><span
+                                class="font-semibold text-slate-500">Total OT Hours:</span> <span
+                                class="font-bold text-slate-700 font-mono"><span id="invOtHours"></span> Hrs</span></p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Fuel Adjustment Breakdown -->
+            <div class="mb-4 flex-grow">
+                <h4 class="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center"><i
+                        class="fa-solid fa-list-ul mr-2"></i> Price Adjustment Breakdown</h4>
+                <div class="rounded-xl border border-slate-200 overflow-hidden">
+                    <table class="w-full text-left border-collapse text-sm">
+                        <thead>
+                            <tr class="bg-slate-50 text-slate-500 text-[10px] uppercase tracking-widest">
+                                <th class="p-2 font-bold border-b border-slate-200">Period Segment</th>
+                                <th class="p-3 font-bold text-center border-b border-slate-200">Run (Km)</th>
+                                <th class="p-3 font-bold text-center border-b border-slate-200">Rate/Km</th>
+                                <th class="p-3 font-bold text-right border-b border-slate-200">Actual Rate</th>
+                                <th class="p-3 font-bold text-right border-b border-slate-200">Difference</th>
+                                <th class="p-3 font-black text-right border-b border-slate-200 text-slate-700">
+                                    Adjustment (Rs)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="invRangesBody">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Final Summary -->
+            <div class="flex justify-end mb-6">
+                <div class="w-2/3 lg:w-3/5">
+                    <div class="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                        <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 text-center">
+                            Financial Summary</h4>
+                        <div class="space-y-3 text-sm" id="invSummaryContent">
+                            <!-- Populated via JS -->
+                        </div>
+
+                        <div
+                            class="mt-4 pt-4 border-t-2 border-slate-200 flex justify-between items-center text-slate-900">
+                            <span class="text-sm font-black uppercase tracking-widest text-slate-500">Net Total
+                                Bill</span>
+                            <div class="flex items-baseline gap-1">
+                                <span class="text-base font-bold text-slate-400">Rs.</span>
+                                <span class="text-2xl font-black font-mono tracking-tight" id="invNetTotal"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Footer at bottom of flex layout -->
+            <div class="mt-auto pt-8 border-t border-slate-200 flex justify-between text-slate-400">
+                <p class="text-[10px] font-bold uppercase tracking-widest text-brand-600"><i
+                        class="fa-solid fa-code mr-1"></i> Created By: Gayan Chinthaka</p>
+                <div class="text-center text-xs font-semibold">
+                    <p class="mb-8 border-b border-slate-300 w-48 inline-block"></p>
+                    <p class="uppercase tracking-widest text-[10px]">Authorized Signature / Seal</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script src="app.js"></script>
+</body>
+
+</html>
